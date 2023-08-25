@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from enum import Enum
-from typing import TypedDict, List, Dict, Any
+from enum import Enum, auto
+from typing import Any, Dict, List, TypedDict
 
 from stream import InputStream, OutputStream
 from tokenizer import Token, TokenType
@@ -12,8 +12,8 @@ class CommandException(Exception):
 
 
 class ArgType(Enum):
-    FLAG = 1
-    ARG = 2
+    FLAG = auto()
+    ARG = auto()
 
 
 class ArgOption(TypedDict):
@@ -141,9 +141,7 @@ class Command:
 class Cat(Command):
     name = "cat"
     opts = [{
-        "name": "number",
-        "flag": "n",
-        "type": ArgType.FLAG
+        "name": "number", "flag": "n", "type": ArgType.FLAG
     }]
 
     def run(self, stdin, stdout, stderr):
@@ -172,10 +170,7 @@ class Yes(Command):
 class Head(Command):
     name = "head"
     opts = [{
-        "name": "number",
-        "flag": "n",
-        "longName": "number",
-        "type": ArgType.ARG
+        "name": "number", "flag": "n", "longName": "number", "type": ArgType.ARG
     }]
 
     def run(self, stdin, stdout, stderr):
@@ -191,10 +186,7 @@ class Head(Command):
 class Tail(Command):
     name = "tail"
     opts = [{
-        "name": "number",
-        "flag": "n",
-        "longName": "number",
-        "type": ArgType.ARG
+        "name": "number", "flag": "n", "longName": "number", "type": ArgType.ARG
     }]
 
     def run(self, stdin, stdout, stderr):
@@ -218,15 +210,9 @@ class Rev(Command):
 class Sort(Command):
     name = "sort"
     opts = [{
-        "name": "reverse",
-        "flag": "r",
-        "longName": "reverse",
-        "type": ArgType.FLAG
+        "name": "reverse", "flag": "r", "longName": "reverse", "type": ArgType.FLAG
     }, {
-        "name": "unique",
-        "flag": "u",
-        "longName": "unique",
-        "type": ArgType.FLAG
+        "name": "unique", "flag": "u", "longName": "unique", "type": ArgType.FLAG
     }]
 
     def run(self, stdin, stdout, stderr):

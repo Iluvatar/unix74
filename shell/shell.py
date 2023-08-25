@@ -1,12 +1,12 @@
 import concurrent.futures
 import os
 from collections.abc import Callable
-from typing import List, Dict
+from typing import Dict, List
 
 from commands import Command
-from environment import Environment, INode, NoSuchFileException
+from environment import Environment, INode
 from parser import Parser
-from shell_commands import ShellCommand, Ls, Cd
+from shell_commands import Cd, Ls, ShellCommand
 from stream import InputStream, OutputStream, makePipe
 from tokenizer import NaiveTokenizer, Token
 
@@ -58,7 +58,7 @@ class Shell:
             try:
                 command = self.getINodeFromPath(file)
                 return command
-            except NoSuchFileException:
+            except FileNotFoundError:
                 continue
         else:
             raise BashException("command not found")
