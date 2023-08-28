@@ -45,6 +45,12 @@ class FilePermissions:
         self.owner = self.group = self.other = Mode(0)
         self.setPermissions(permissions)
 
+    def __str__(self) -> str:
+        return f"{self.owner}{self.group}{self.other}"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
     def setPermissions(self, permissions: int):
         self.owner, self.group, self.other = FilePermissions.parsePermissions(permissions)
 
@@ -93,6 +99,10 @@ class INode:
     deviceNumber: int = -1
     references: int = 1
 
+    @property
+    def inumber(self):
+        return id(self)
+
 
 class INodeData:
     def __init__(self):
@@ -124,13 +134,15 @@ class DirectoryData(INodeData):
     def __makeData(self):
         self.data = ""
         for name, inode in self.children.items():
-            self.data += f"{name}{id(inode)}"
+            self.data += f"{name}{inode.inumber}"
 
     def addChildren(self, children: Dict[str, INode]):
         for name, child in children.items():
             self.addChild(name, child)
 
     def addChild(self, name: str, child: INode):
+        if name == "":
+            raise FilesystemError("File names cannot be empty")
         self.children[name] = child
         self.__makeData()
 

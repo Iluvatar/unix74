@@ -1,5 +1,6 @@
 import datetime
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from filesystem.filesystem import FilePermissions, FileType, INode
 from user import GID, UID
@@ -13,6 +14,7 @@ class DirEnt:
 
 @dataclass
 class Stat:
+    inode: INode
     permissions: FilePermissions
     fileType: FileType
     owner: UID
@@ -21,3 +23,9 @@ class Stat:
     timeModified: datetime.datetime
     deviceNumber: int = -1
     references: int = 1
+
+
+class INodeOperation(Enum):
+    GET = auto()
+    CREATE = auto()
+    DELETE = auto()

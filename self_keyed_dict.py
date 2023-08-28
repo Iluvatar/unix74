@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import Generic, TypeVar, Dict
+from typing import Dict, Generic, TypeVar
 
 Type = TypeVar("Type")
 KeyType = TypeVar("KeyType")
@@ -15,11 +15,7 @@ class SelfKeyedDict(Generic[Type, KeyType]):
     def __len__(self) -> int:
         return len(self.backingDict)
 
-    def __contains__(self, item: Type | KeyType) -> bool:
-        if type(item) == Type:
-            key: KeyType = getattr(item, self.key)
-        else:
-            key: KeyType = item
+    def __contains__(self, key: KeyType) -> bool:
         return key in self.backingDict
 
     def __getitem__(self, keyValue: KeyType) -> Type:
@@ -35,11 +31,7 @@ class SelfKeyedDict(Generic[Type, KeyType]):
         key: KeyType = getattr(item, self.key)
         self.backingDict[key] = item
 
-    def remove(self, item: Type | KeyType) -> None:
-        if type(item) == Type:
-            key: KeyType = getattr(item, self.key)
-        else:
-            key: KeyType = item
+    def remove(self, key: KeyType) -> None:
         del self.backingDict[key]
 
     def clear(self) -> None:

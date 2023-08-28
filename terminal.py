@@ -3,6 +3,8 @@ from process.process import PID
 from unix import SystemHandle, Unix
 from usr.cat import Cat
 from usr.ls import Ls
+from usr.mv import Mv
+from usr.pwd import Pwd
 
 variables = {
     "HOME": "/usr/aero",
@@ -10,22 +12,6 @@ variables = {
     "PATH": "/usr/local/usr:/usr/usr",
     "PS1": r"[\u@\h \W]\$ "
 }
-
-# def ls(node: INode, indent: int = 0):
-#     if node.fileType != FileType.DIRECTORY:
-#         raise ValueError("can only handle directories")
-#
-#     if indent == 0:
-#         print("/")
-#
-#     for name, child in sorted(cast(DirectoryData, node.data).children.items()):
-#         print("    " * (indent + 1) + f"{name}", end="")
-#         if child.fileType == FileType.DIRECTORY and not name.startswith("."):
-#             print(" ↴")
-#             ls(child, indent + 1)
-#         else:
-#             print()
-
 
 unix = Unix()
 unix.startup()
@@ -35,18 +21,51 @@ shell = unix.processes[PID(1)]
 system = SystemHandle(shell.pid, unix)
 libc = Libc(system)
 
-Ls(system, libc, ["ls"]).run()
-print()
-Ls(system, libc, ["ls", "/"]).run()
-print()
-Ls(system, libc, ["ls", "/etc"]).run()
-print()
-Ls(system, libc, ["ls", "/dev"]).run()
-print()
-Ls(system, libc, ["ls", "/usr/liz"]).run()
-print()
+try:
+    while True:
+        # print(unix)
+        # print(shell)
 
-Cat(system, libc, ["cat", "/usr/liz/note.txt"]).run()
+        try:
+            i = input("$ ")
+        except KeyboardInterrupt:
+            libc.printf("\n")
+            continue
+        except EOFError:
+            libc.printf("\n")
+            break
+
+        if not i:
+            continue
+
+        tokens = i.split()
+        command = tokens[0]
+        args = tokens[1:]
+
+        try:
+            if command == "ls":
+                Ls(system, libc, args).run()
+            elif command == "cat":
+                Cat(system, libc, args).run()
+            elif command == "pwd":
+                Pwd(system, libc, args).run()
+            elif command == "mv":
+                Mv(system, libc, args).run()
+            elif command == "cd":
+                path = "/"
+                if len(args) > 0:
+                    path = args[0]
+                try:
+                    system.chdir(path)
+                except FileNotFoundError:
+                    libc.printf(f"{path}: No such file or directory\n")
+            else:
+                libc.printf(f"{command}: Command not found.\n")
+        except PermissionError:
+            libc.printf(f"sh: {command}: Operation not permitted\n")
+except KeyboardInterrupt:
+    libc.printf("\n")
+    pass
 
 # fd = handle.open("/usr/liz/note.txt", FileMode.READ)
 # fd2 = handle.open("/usr/liz", FileMode.READ)
