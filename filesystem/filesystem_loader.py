@@ -5,9 +5,13 @@ from collections import defaultdict
 from datetime import datetime
 from typing import DefaultDict
 
-from filesystem.dev_files import DevConsole, DevNull
-from filesystem.filesystem import DirectoryData, FilePermissions, FileType, INode, INodeData, Mode, RegularFileData
+from filesystem.dev_files import DevConsole, DevNull, Mem
+from filesystem.filesystem import DirectoryData, FilePermissions, FileType, INode, INodeData, Mode, RegularFileData, \
+    SetId
 from user import GID, UID
+
+if typing.TYPE_CHECKING:
+    from unix import Unix
 
 origTime = datetime(1974, 10, 17, 10, 14, 27, 387)
 
@@ -73,9 +77,10 @@ def makeChildFile(parent: INode, name: str, data: INodeData, *, permissions: Fil
 
     if permissions is None:
         permissions = parent.permissions.copy()
-        permissions.modifyPermissions(FilePermissions.Entity.OWNER, FilePermissions.Op.REM, Mode.EXEC)
-        permissions.modifyPermissions(FilePermissions.Entity.GROUP, FilePermissions.Op.REM, Mode.EXEC)
-        permissions.modifyPermissions(FilePermissions.Entity.OTHER, FilePermissions.Op.REM, Mode.EXEC)
+        permissions.modifyPermissions(FilePermissions.PermGroup.HIGH, FilePermissions.Op.REM, SetId.ALL)
+        permissions.modifyPermissions(FilePermissions.PermGroup.OWNER, FilePermissions.Op.REM, Mode.EXEC)
+        permissions.modifyPermissions(FilePermissions.PermGroup.GROUP, FilePermissions.Op.REM, Mode.EXEC)
+        permissions.modifyPermissions(FilePermissions.PermGroup.OTHER, FilePermissions.Op.REM, Mode.EXEC)
 
     return makeChild(parent, name, filetype, data, permissions=permissions, owner=owner, group=group,
                      timeCreated=timeCreated, timeModified=timeModified)
@@ -84,30 +89,19 @@ def makeChildFile(parent: INode, name: str, data: INodeData, *, permissions: Fil
 def makeEtc(root: INode) -> INode:
     etcDir = makeChildDir(root, "etc")
 
-    makeChildFile(etcDir, "passwd", loadFile("root/etc/passwd"), permissions=FilePermissions(644))
-    makeChildFile(etcDir, "group", loadFile("root/etc/group"), permissions=FilePermissions(644))
+    makeChildFile(etcDir, "passwd", loadFile("root/etc/passwd"), permissions=FilePermissions(0o644))
+    makeChildFile(etcDir, "group", loadFile("root/etc/group"), permissions=FilePermissions(0o644))
 
     return etcDir
 
 
-def makeRoot():
-    root = INode(FilePermissions(755), FileType.DIRECTORY, users["root"], groups["root"], origTime, origTime,
-                 DirectoryData())
-    typing.cast(DirectoryData, root.data).addChildren({
-        ".": root,
-        "..": root
-    })
-    root.references = 2
-
-    binDir = makeChildDir(root, "bin")
-    etcDir = typing.cast(DirectoryData, root.data).addChild("etc", makeEtc(root))
-    usrDir = makeChildDir(root, "usr")
-    varDir = makeChildDir(root, "var")
-
+def makeLizHome(usrDir: INode) -> None:
     lizCreatedTime = datetime(1974, 12, 2, 1, 24, 13, 989)
     lizHomeDir = makeChildDir(usrDir, "liz", owner=users["liz"], group=groups["liz"], timeCreated=lizCreatedTime)
     makeChildFile(lizHomeDir, "note.txt", loadFile("root/usr/liz/note.txt"))
 
+
+def makeMurtaughHome(usrDir: INode) -> None:
     murtaughCreatedTime = datetime(1974, 12, 18, 19, 1, 37, 182)
     murtaughHomeDir = makeChildDir(usrDir, "murtaugh", owner=users["murtaugh"], group=groups["murtaugh"],
                                    timeCreated=murtaughCreatedTime)
@@ -124,15 +118,35 @@ def makeRoot():
     makeChildFile(murtaughHomeDir, "portal.txt", loadFile("root/usr/murtaugh/portal.txt"),
                   timeCreated=datetime(1977, 1, 8, 18, 17, 22, 374))
 
+
+def makeRoot():
+    root = INode(FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"], origTime, origTime,
+                 DirectoryData())
+    typing.cast(DirectoryData, root.data).addChildren({
+        ".": root,
+        "..": root
+    })
+    root.references = 2
+
+    binDir = makeChildDir(root, "bin")
+    etcDir = typing.cast(DirectoryData, root.data).addChild("etc", makeEtc(root))
+    usrDir = makeChildDir(root, "usr")
+    tmpDir = makeChildDir(root, "tmp", permissions=FilePermissions(0o1777))
+    varDir = makeChildDir(root, "var")
+
+    makeLizHome(usrDir)
+    makeMurtaughHome(usrDir)
+
     return root
 
 
-def makeDev():
-    devDir = INode(FilePermissions(755), FileType.DIRECTORY, users["root"], groups["root"], origTime, origTime,
+def makeDev(unix: Unix):
+    devDir = INode(FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"], origTime, origTime,
                    DirectoryData())
     typing.cast(DirectoryData, devDir.data).addChild(".", devDir)
 
-    makeChildFile(devDir, "null", DevNull(), filetype=FileType.CHARACTER, permissions=FilePermissions(666))
-    makeChildFile(devDir, "console", DevConsole(), filetype=FileType.CHARACTER, permissions=FilePermissions(666))
+    makeChildFile(devDir, "null", DevNull(unix), filetype=FileType.CHARACTER, permissions=FilePermissions(0o666))
+    makeChildFile(devDir, "console", DevConsole(unix), filetype=FileType.CHARACTER, permissions=FilePermissions(0o666))
+    makeChildFile(devDir, "mem", Mem(unix), filetype=FileType.CHARACTER, permissions=FilePermissions(0o666))
 
     return devDir

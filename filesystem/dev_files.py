@@ -1,3 +1,5 @@
+from typing import List
+
 from filesystem.filesystem import SpecialFileData
 
 
@@ -16,10 +18,8 @@ class DevConsole(SpecialFileData):
     def read(self, size, offset):
         data = ""
         try:
-            while True:
-                data += input() + "\n"
-                if len(data) >= size:
-                    return data[:size]
+            data = input() + "\n"
+            return data[:size]
         except EOFError:
             return data
 
@@ -28,3 +28,18 @@ class DevConsole(SpecialFileData):
 
     def append(self, data):
         print(data)
+
+
+class Mem(SpecialFileData):
+    def read(self, size, offset):
+        lines: List[str] = []
+        for process in self.unix.processes:
+            lines.append(".".join([str(process.pid), str(process.uid), str(process.tty), process.command]))
+        string = "\n".join(lines)
+        return string[offset:offset + size]
+
+    def write(self, data, offset):
+        pass
+
+    def append(self, data):
+        pass

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from threading import Thread
 from typing import Any, Dict, List, NewType, Type, cast
 
 from environment import Environment
@@ -27,6 +28,9 @@ class SystemHandle:
     def __init__(self, pid: PID, unix: Unix):
         self.__pid = pid
         self.__unix = unix
+
+    def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
+        return self.__unix.fork(self.__pid, child, command, argv)
 
     def open(self, path: str, mode: FileMode) -> FD:
         return self.__unix.open(self.__pid, path, mode)
@@ -60,6 +64,27 @@ class SystemHandle:
 
     def chown(self, path: str, owner: UID, group: GID) -> int:
         return self.__unix.chown(self.__pid, path, owner, group)
+
+    def getuid(self) -> UID:
+        return self.__unix.getuid(self.__pid)
+
+    def geteuid(self) -> UID:
+        return self.__unix.geteuid(self.__pid)
+
+    def setuid(self, uid: UID) -> int:
+        return self.__unix.setuid(self.__pid, uid)
+
+    def getgid(self) -> GID:
+        return self.__unix.getgid(self.__pid)
+
+    def getegid(self) -> GID:
+        return self.__unix.getegid(self.__pid)
+
+    def setgid(self, gid: GID) -> int:
+        return self.__unix.setgid(self.__pid, gid)
+
+    def getpid(self) -> PID:
+        return self.__unix.getpid(self.__pid)
 
     def gettimeofday(self, time: int) -> int:
         return self.__unix.gettimeofday(self.__pid, time)
@@ -185,14 +210,14 @@ class Unix:
                 return True
 
         process = self.getProcess(pid)
-        if self.isSuperUser(process.owner):
+        if self.isSuperUser(process.uid):
             if Mode.EXEC in mode and Mode.EXEC not in (
                     inode.permissions.owner | inode.permissions.group | inode.permissions.other):
                 raise PermissionError()
             return True
-        if process.owner == inode.owner:
+        if process.uid == inode.owner:
             return checkModeSubset(mode, inode.permissions.owner)
-        if process.group == inode.group:
+        if process.gid == inode.group:
             return checkModeSubset(mode, inode.permissions.group)
         return checkModeSubset(mode, inode.permissions.other)
 
@@ -230,7 +255,7 @@ class Unix:
                 pass
 
             self.access(pid, currentNode, Mode.WRITE)
-            child = INode(currentNode.permissions, FileType.NONE, process.owner, process.group, datetime.now(),
+            child = INode(currentNode.permissions, FileType.NONE, process.uid, process.gid, datetime.now(),
                           datetime.now(), INodeData())
             cast(DirectoryData, currentNode.data).addChild(parts[-1], child)
         else:
@@ -248,15 +273,25 @@ class Unix:
     # System calls
 
     @strace
-    def fork(self, pid: PID, child: Type[ProcessCode], argv: List[str]) -> PID:
+    def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
         process = self.getProcess(pid)
         childPid = self.claimNextPid()
+        childProcess = Process(childPid, process, command, process.realUid, process.realGid, process.currentDir,
+                               process.env)
+        self.processes.add(childProcess)
+
         system = SystemHandle(childPid, self)
         libc = Libc(system)
         childProcess = child(system, libc, argv)
-        # t = Thread(target=child.run, )
 
-        return PID(0)
+        def run():
+            childProcess.run()
+            self.processes.remove(childPid)
+
+        thread = Thread(target=run, daemon=True)
+        thread.start()
+
+        return PID(childPid)
 
     @strace
     def open(self, pid: PID, path: str, mode: FileMode) -> FD:
@@ -371,12 +406,46 @@ class Unix:
         pass
 
     @strace
+    def getuid(self, pid: PID) -> UID:
+        process = self.getProcess(pid)
+        return process.realUid
+
+    @strace
+    def geteuid(self, pid: PID) -> UID:
+        process = self.getProcess(pid)
+        return process.uid
+
+    @strace
     def setuid(self, pid: PID, uid: UID) -> int:
-        pass
+        process = self.getProcess(pid)
+        if uid == process.uid or uid == process.realUid or self.isSuperUser(process.uid):
+            process.uid = uid
+            process.realUid = uid
+            return 0
+        return 1
+
+    @strace
+    def getgid(self, pid: PID) -> GID:
+        process = self.getProcess(pid)
+        return process.realGid
+
+    @strace
+    def getegid(self, pid: PID) -> GID:
+        process = self.getProcess(pid)
+        return process.gid
 
     @strace
     def setgid(self, pid: PID, gid: GID) -> int:
-        pass
+        process = self.getProcess(pid)
+        if gid == process.gid or gid == process.realGid or self.isSuperUser(process.uid):
+            process.gid = gid
+            process.realGid = gid
+            return 0
+        return 1
+
+    @strace
+    def getpid(self, pid: PID) -> PID:
+        return pid
 
     @strace
     def gettimeofday(self, pid: PID, time: int) -> int:
@@ -388,7 +457,7 @@ class Unix:
         targetInode = self.getINodeFromPath(pid, target)
 
         if targetInode.fileType == FileType.DIRECTORY or alias.endswith("/"):
-            if not (targetInode.fileType == FileType.DIRECTORY and self.isSuperUser(process.owner)):
+            if not (targetInode.fileType == FileType.DIRECTORY and self.isSuperUser(process.uid)):
                 raise KernelError("Cannot hard link directories")
             alias = alias.rstrip("/")
 
@@ -415,7 +484,7 @@ class Unix:
         childInode = self.getINodeFromPath(pid, target)
 
         self.access(pid, parentInode, Mode.WRITE)
-        if childInode.fileType == FileType.DIRECTORY and not self.isSuperUser(process.owner):
+        if childInode.fileType == FileType.DIRECTORY and not self.isSuperUser(process.uid):
             raise KernelError("Cannot unlink directories")
 
         childName: str = ""
@@ -495,7 +564,7 @@ class Unix:
         # init = swapper.makeChild(1, "init")
 
         self.rootMount = makeRoot()
-        devDir = makeDev()
+        devDir = makeDev(self)
         cast(DirectoryData, devDir.data).addChild("..", self.rootMount)
         self.rootMount.references += 1
         cast(DirectoryData, self.rootMount.data).addChild("dev", devDir)

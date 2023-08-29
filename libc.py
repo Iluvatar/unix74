@@ -35,6 +35,9 @@ class Libc:
     def write(self, fd: FD, data: str) -> int:
         return self.system.write(fd, data)
 
+    def close(self, fd: FD) -> int:
+        return self.system.close(fd)
+
     def crypt(self, plaintext) -> str:
         return md5(plaintext.encode("utf-8")).hexdigest()[:16]
 

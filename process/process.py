@@ -20,12 +20,21 @@ class Process:
     pid: PID
     parent: Process
     command: str
-    owner: UID
-    group: GID
+    realUid: UID
+    realGid: GID
     currentDir: INode
     env: Environment
+    uid: UID | None = None
+    gid: GID | None = None
+    tty: int = -1
     fdTable: SelfKeyedDict[ProcessFileDescriptor, FD] = field(default_factory=lambda: SelfKeyedDict("id"))
     children: MutableSet[Process] = field(default_factory=set)
+
+    def __post_init__(self):
+        if self.uid is None:
+            self.uid = self.realUid
+        if self.gid is None:
+            self.gid = self.realGid
 
     def claimNextFdNum(self):
         i: FD = FD(0)
@@ -41,7 +50,7 @@ class Process:
 
     def __str__(self) -> str:
         fds = ",".join([str(fd) for fd in self.fdTable])
-        return f"['{self.command}', pid:{self.pid}, owner: {self.owner}, fd: [{fds}]]"
+        return f"['{self.command}', pid: {self.pid}, owner: {self.uid}, fd: [{fds}]]"
 
 
 class OsProcess:

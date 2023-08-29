@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import datetime
+import typing
 from dataclasses import dataclass
 from enum import Enum, IntFlag, auto
 from typing import Dict
 
 from user import GID, UID
+
+if typing.TYPE_CHECKING:
+    from unix import Unix
 
 
 class INodeException(Exception):
@@ -29,10 +33,19 @@ class Mode(IntFlag):
     READ = 4
     WRITE = 2
     EXEC = 1
+    ALL = READ | WRITE | EXEC
+
+
+class SetId(IntFlag):
+    SET_UID = 4
+    SET_GID = 2
+    STICKY = 1
+    ALL = SET_UID | SET_GID | STICKY
 
 
 class FilePermissions:
-    class Entity(Enum):
+    class PermGroup(Enum):
+        HIGH = auto()
         OWNER = auto()
         GROUP = auto()
         OTHER = auto()
@@ -42,25 +55,31 @@ class FilePermissions:
         REM = auto()
 
     def __init__(self, permissions: int):
+        self.high = SetId(0)
         self.owner = self.group = self.other = Mode(0)
         self.setPermissions(permissions)
 
     def __str__(self) -> str:
-        return f"{self.owner}{self.group}{self.other}"
+        return f"{self.high}{self.owner}{self.group}{self.other}"
 
     def __repr__(self) -> str:
         return self.__str__()
 
     def setPermissions(self, permissions: int):
-        self.owner, self.group, self.other = FilePermissions.parsePermissions(permissions)
+        self.high, self.owner, self.group, self.other = FilePermissions.parsePermissions(permissions)
 
-    def modifyPermissions(self, entity: Entity, op: Op, mode: Mode):
-        if entity == FilePermissions.Entity.OWNER:
+    def modifyPermissions(self, entity: PermGroup, op: Op, mode: Mode | SetId):
+        if entity == FilePermissions.PermGroup.HIGH:
+            if op == FilePermissions.Op.ADD:
+                self.high |= mode
+            else:
+                self.high &= ~mode
+        if entity == FilePermissions.PermGroup.OWNER:
             if op == FilePermissions.Op.ADD:
                 self.owner |= mode
             else:
                 self.owner &= ~mode
-        elif entity == FilePermissions.Entity.GROUP:
+        elif entity == FilePermissions.PermGroup.GROUP:
             if op == FilePermissions.Op.ADD:
                 self.group |= mode
             else:
@@ -72,16 +91,17 @@ class FilePermissions:
                 self.other &= ~mode
 
     @staticmethod
-    def parsePermissions(permissions: int) -> (Mode, Mode, Mode):
-        otherPermissions = permissions % 10
-        groupPermissions = (permissions // 10) % 10
-        ownerPermissions = (permissions // 100) % 10
-        if not (0 <= otherPermissions < 8 and 0 <= groupPermissions < 8 and 0 <= ownerPermissions < 8):
+    def parsePermissions(permissions: int) -> (SetId, Mode, Mode, Mode):
+        if permissions < 0 or permissions >= 8 ** 4:
             raise ValueError(f"Invalid file permissions '{permissions}'")
-        return Mode(ownerPermissions), Mode(groupPermissions), Mode(otherPermissions)
+        otherPermissions = permissions % 8
+        groupPermissions = (permissions // 8) % 8
+        ownerPermissions = (permissions // 8 ** 2) % 8
+        highPermissions = (permissions // 8 ** 3) % 8
+        return SetId(highPermissions), Mode(ownerPermissions), Mode(groupPermissions), Mode(otherPermissions)
 
     def getPermissionsAsInt(self) -> int:
-        return self.owner * 100 + self.group * 10 + self.other
+        return self.high * 8 ** 3 + self.owner * 8 ** 2 + self.group * 8 + self.other
 
     def copy(self) -> FilePermissions:
         return FilePermissions(self.getPermissionsAsInt())
@@ -170,6 +190,10 @@ class RegularFileData(INodeData):
 
 
 class SpecialFileData(INodeData):
+    def __init__(self, unix: Unix):
+        super().__init__()
+        self.unix = unix
+
     def read(self, size, offset):
         raise NotImplementedError()
 

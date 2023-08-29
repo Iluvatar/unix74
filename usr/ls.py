@@ -1,7 +1,7 @@
 import datetime
 from typing import Dict, List
 
-from filesystem.filesystem import FileType, INode, Mode
+from filesystem.filesystem import FileType, INode, Mode, SetId
 from process.file_descriptor import FileMode
 from process.process_code import ProcessCode
 from user import GID, UID
@@ -97,17 +97,20 @@ class Ls(ProcessCode):
             return groupDict
 
         def permissionString(inode: INode) -> str:
-            def modeToString(mode: Mode) -> str:
-                r = "r" if Mode.READ in mode else "-"
-                w = "w" if Mode.WRITE in mode else "-"
-                x = "x" if Mode.EXEC in mode else "-"
-                return f"{r}{w}{x}"
+            perms = inode.permissions
 
-            fileTypeStr = fileTypeChar[inode.fileType]
-            ownerStr = modeToString(inode.permissions.owner)
-            groupStr = modeToString(inode.permissions.group)
-            otherStr = modeToString(inode.permissions.other)
-            return f"{fileTypeStr}{ownerStr}{groupStr}{otherStr}"
+            s = fileTypeChar[inode.fileType]
+            s += "r" if perms.owner & Mode.READ else "-"
+            s += "w" if perms.owner & Mode.WRITE else "-"
+            s += "s" if perms.high & SetId.SET_UID else "x" if perms.owner & Mode.EXEC else "-"
+            s += "r" if perms.group & Mode.READ else "-"
+            s += "w" if perms.group & Mode.WRITE else "-"
+            s += "s" if perms.high & SetId.SET_GID else "x" if perms.group & Mode.EXEC else "-"
+            s += "r" if perms.other & Mode.READ else "-"
+            s += "w" if perms.other & Mode.WRITE else "-"
+            s += "t" if perms.high & SetId.STICKY else "x" if perms.other & Mode.EXEC else "-"
+
+            return s
 
         def formatTime(time: datetime.datetime) -> str:
             date = f"{time.strftime('%b')} {time.day: >2}"

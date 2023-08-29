@@ -1,9 +1,13 @@
+from typing import Dict, Type
+
 from libc import Libc
 from process.process import PID
+from process.process_code import ProcessCode
 from unix import SystemHandle, Unix
 from usr.cat import Cat
 from usr.ls import Ls
 from usr.mv import Mv
+from usr.ps import Ps
 from usr.pwd import Pwd
 
 variables = {
@@ -43,15 +47,15 @@ try:
         args = tokens[1:]
 
         try:
-            if command == "ls":
-                Ls(system, libc, args).run()
-            elif command == "cat":
-                Cat(system, libc, args).run()
-            elif command == "pwd":
-                Pwd(system, libc, args).run()
-            elif command == "mv":
-                Mv(system, libc, args).run()
-            elif command == "cd":
+            commandDict: Dict[str, Type[ProcessCode]] = {
+                "ls": Ls,
+                "cat": Cat,
+                "pwd": Pwd,
+                "mv": Mv,
+                "ps": Ps,
+            }
+
+            if command == "cd":
                 path = "/"
                 if len(args) > 0:
                     path = args[0]
@@ -59,6 +63,8 @@ try:
                     system.chdir(path)
                 except FileNotFoundError:
                     libc.printf(f"{path}: No such file or directory\n")
+            elif command in commandDict:
+                system.fork(commandDict[command], command, args)
             else:
                 libc.printf(f"{command}: Command not found.\n")
         except PermissionError:
