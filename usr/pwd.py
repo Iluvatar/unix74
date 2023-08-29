@@ -14,7 +14,7 @@ class Pwd(ProcessCode):
             for entry in siblings:
                 if entry.name in [".", ".."]:
                     continue
-                if entry.inode.inumber == stat.inode.inumber:
+                if entry.iNumber.iNumber == stat.iNumber.iNumber:
                     parts.append(entry.name)
                     self.system.close(fd)
                     self.system.chdir("..")

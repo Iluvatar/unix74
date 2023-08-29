@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
+from multiprocessing import Lock, Pipe
+from multiprocessing.connection import Connection
 from threading import Thread
-from typing import Any, Dict, List, NewType, Type, cast
+from typing import Any, Dict, List, NewType, Tuple, Type, cast
 
 from environment import Environment
-from filesystem.filesystem import DirectoryData, FilePermissions, FileType, INode, INodeData, Mode, RegularFileData
-from filesystem.filesystem_loader import makeDev, makeRoot
+from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, Mode
+from filesystem.filesystem_loader import makeRoot
 from filesystem.filesystem_utils import DirEnt, INodeOperation, Stat
 from libc import Libc
-from process.file_descriptor import BadFileNumberError, FD, FileMode, OFD, OpenFileDescriptor, PID, SeekFrom
-from process.process import Process, ProcessFileDescriptor
+from process.file_descriptor import FD, FileMode, OFD, OpenFileDescriptor, PID, SeekFrom
+from process.process import ProcessEntry, ProcessFileDescriptor
 from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
 from user import GID, Group, GroupName, GroupPassword, Password, UID, User, UserName
@@ -25,97 +28,127 @@ GroupId = NewType('GroupId', int)
 
 
 class SystemHandle:
-    def __init__(self, pid: PID, unix: Unix):
-        self.__pid = pid
-        self.__unix = unix
+    # def __init__(self, pid: PID, unix: Unix):
+    #     self.__pid = pid
+    #     self.__unix = unix
 
-    def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
-        return self.__unix.fork(self.__pid, child, command, argv)
+    def __init__(self, pid: PID, lock: Lock, pipe: Connection):
+        self.pid = pid
+        self.lock = lock
+        self.pipe = pipe
+
+    """
+    # def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
+    #     return self.__unix.fork(self.__pid, child, command, argv)
+    #
+    # def open(self, path: str, mode: FileMode) -> FD:
+    #     return self.__unix.open(self.__pid, path, mode)
+    #
+    # def lseek(self, fd: FD, offset: int, whence: SeekFrom) -> int:
+    #     return self.__unix.lseek(self.__pid, fd, offset, whence)
+    """
+
+    def syscall(self, name: str, *args):
+        with self.lock:
+            self.pipe.send((name, self.pid, *args))
+            ret = self.pipe.recv()
+            if ret[0] != 0:
+                raise ValueError(ret[0])
+            return ret[1]
 
     def open(self, path: str, mode: FileMode) -> FD:
-        return self.__unix.open(self.__pid, path, mode)
-
-    def lseek(self, fd: FD, offset: int, whence: SeekFrom) -> int:
-        return self.__unix.lseek(self.__pid, fd, offset, whence)
+        return self.syscall("open", path, mode)
 
     def read(self, fd: FD, size: int) -> str:
-        return self.__unix.read(self.__pid, fd, size)
+        return self.syscall("read", fd, size)
 
     def write(self, fd: FD, data: str) -> int:
-        return self.__unix.write(self.__pid, fd, data)
-
-    def close(self, fd: FD) -> int:
-        return self.__unix.close(self.__pid, fd)
-
-    def pipe(self) -> (FD, FD):
-        return self.__unix.pipe(self.__pid)
+        return self.syscall("write", fd, data)
 
     def stat(self, path: str) -> Stat:
-        return self.__unix.stat(self.__pid, path)
+        return self.syscall("stat", path)
 
     def getdents(self, fd: FD) -> List[DirEnt]:
-        return self.__unix.getdents(self.__pid, fd)
+        return self.syscall("getdents", fd)
 
-    def chdir(self, path: str) -> None:
-        return self.__unix.chdir(self.__pid, path)
-
-    def chmod(self, path: str, permissions: FilePermissions) -> int:
-        return self.__unix.chmod(self.__pid, path, permissions)
-
-    def chown(self, path: str, owner: UID, group: GID) -> int:
-        return self.__unix.chown(self.__pid, path, owner, group)
-
-    def getuid(self) -> UID:
-        return self.__unix.getuid(self.__pid)
-
-    def geteuid(self) -> UID:
-        return self.__unix.geteuid(self.__pid)
-
-    def setuid(self, uid: UID) -> int:
-        return self.__unix.setuid(self.__pid, uid)
-
-    def getgid(self) -> GID:
-        return self.__unix.getgid(self.__pid)
-
-    def getegid(self) -> GID:
-        return self.__unix.getegid(self.__pid)
-
-    def setgid(self, gid: GID) -> int:
-        return self.__unix.setgid(self.__pid, gid)
-
-    def getpid(self) -> PID:
-        return self.__unix.getpid(self.__pid)
-
-    def gettimeofday(self, time: int) -> int:
-        return self.__unix.gettimeofday(self.__pid, time)
-
-    def link(self, target: str, alias: str) -> None:
-        return self.__unix.link(self.__pid, target, alias)
-
-    def unlink(self, target: str) -> None:
-        return self.__unix.unlink(self.__pid, target)
-
-    def mkdir(self, path: str, permissions: FilePermissions) -> int:
-        return self.__unix.mkdir(self.__pid, path, permissions)
-
-    def rename(self, path: str, to: str) -> int:
-        return self.__unix.rename(self.__pid, path, to)
-
-    def rmdir(self, path: str) -> int:
-        return self.__unix.rmdir(self.__pid, path)
-
-    def symlink(self, target: str, alias: str) -> int:
-        return self.__unix.symlink(self.__pid, target, alias)
+    """
+    # def close(self, fd: FD) -> int:
+    #     return self.__unix.close(self.__pid, fd)
+    # 
+    # def pipe(self) -> (FD, FD):
+    #     return self.__unix.pipe(self.__pid)
+    # 
+    # def stat(self, path: str) -> Stat:
+    #     return self.__unix.stat(self.__pid, path)
+    # 
+    # def getdents(self, fd: FD) -> List[DirEnt]:
+    #     return self.__unix.getdents(self.__pid, fd)
+    # 
+    # def chdir(self, path: str) -> None:
+    #     return self.__unix.chdir(self.__pid, path)
+    # 
+    # def chmod(self, path: str, permissions: FilePermissions) -> int:
+    #     return self.__unix.chmod(self.__pid, path, permissions)
+    # 
+    # def chown(self, path: str, owner: UID, group: GID) -> int:
+    #     return self.__unix.chown(self.__pid, path, owner, group)
+    # 
+    # def getuid(self) -> UID:
+    #     return self.__unix.getuid(self.__pid)
+    # 
+    # def geteuid(self) -> UID:
+    #     return self.__unix.geteuid(self.__pid)
+    # 
+    # def setuid(self, uid: UID) -> int:
+    #     return self.__unix.setuid(self.__pid, uid)
+    # 
+    # def getgid(self) -> GID:
+    #     return self.__unix.getgid(self.__pid)
+    # 
+    # def getegid(self) -> GID:
+    #     return self.__unix.getegid(self.__pid)
+    # 
+    # def setgid(self, gid: GID) -> int:
+    #     return self.__unix.setgid(self.__pid, gid)
+    # 
+    # def getpid(self) -> PID:
+    #     return self.__unix.getpid(self.__pid)
+    # 
+    # def gettimeofday(self, time: int) -> int:
+    #     return self.__unix.gettimeofday(self.__pid, time)
+    # 
+    # def link(self, target: str, alias: str) -> None:
+    #     return self.__unix.link(self.__pid, target, alias)
+    # 
+    # def unlink(self, target: str) -> None:
+    #     return self.__unix.unlink(self.__pid, target)
+    # 
+    # def mkdir(self, path: str, permissions: FilePermissions) -> int:
+    #     return self.__unix.mkdir(self.__pid, path, permissions)
+    # 
+    # def rename(self, path: str, to: str) -> int:
+    #     return self.__unix.rename(self.__pid, path, to)
+    # 
+    # def rmdir(self, path: str) -> int:
+    #     return self.__unix.rmdir(self.__pid, path)
+    # 
+    # def symlink(self, target: str, alias: str) -> int:
+    #     return self.__unix.symlink(self.__pid, target, alias)
+"""
 
 
 class Unix:
     def __init__(self):
-        self.mounts: Dict[str, INode] = {}
+        self.mounts: Dict[str, Filesystem] = {}
         self.rootMount: INode | None = None
         self.rootUser: User = User(UserName("root"), Password(""), UID(0), GID(0), "root", "/", "/usr/sh")
-        self.processes: SelfKeyedDict[Process, PID] = SelfKeyedDict("pid")
+        self.processes: SelfKeyedDict[ProcessEntry, PID] = SelfKeyedDict("pid")
         self.openFileTable: SelfKeyedDict[OpenFileDescriptor, OFD] = SelfKeyedDict("id")
         self.nextPid: PID = PID(0)
+
+        self.kernelPipe, self.userPipe = Pipe()
+        self.lock = Lock()
+        self.data = ""
 
         self.doStrace: bool = False
 
@@ -124,8 +157,8 @@ class Unix:
 
         out += f"mounts ({len(self.mounts)}):\n"
         for mount in self.mounts:
-            out += f"    {mount}: {self.mounts[mount].inumber}\n"
-        out += f"root mount is {self.rootMount.inumber}\n\n"
+            out += f"    {mount}: {len(self.mounts[mount])}\n"
+        out += f"root mount is {self.rootMount.iNumber}\n\n"
 
         out += f"processes ({len(self.processes)}):\n"
         for process in self.processes:
@@ -138,15 +171,42 @@ class Unix:
 
         return out
 
+    def doSyscall(self, function: Callable, pid: PID, *args):
+        ret = function(pid, *args)
+        self.kernelPipe.send(ret)
+
+    def run(self):
+        syscallDict = {
+            "open": self.open,
+            "read": self.read,
+            "write": self.write,
+            "getdents": self.getdents,
+            "stat": self.stat,
+        }
+
+        while True:
+            data: Tuple[str, PID, ...] = self.kernelPipe.recv()
+            syscall: str = data[0]
+            pid: PID = data[1]
+            args: Tuple[Any] = data[2:]
+
+            try:
+                if syscall in syscallDict:
+                    self.doSyscall(syscallDict[syscall], pid, *args)
+                else:
+                    self.kernelPipe.send((1, f"Invalid syscall {syscall}"))
+            except TypeError:
+                self.kernelPipe.send((2, "Invalid arguments"))
+
     @staticmethod
     def strace(func):
         def stringify(arg: Any) -> str:
             if isinstance(arg, INode):
                 arg = cast(INode, arg)
-                return f"INode[{arg.inumber}, perm={arg.permissions}, type={arg.fileType}, {arg.owner}:{arg.group}]"
+                return f"INode[{arg.iNumber}, perm={arg.permissions}, type={arg.fileType}, {arg.owner}:{arg.group}]"
             elif isinstance(arg, Stat):
                 arg = cast(Stat, arg)
-                return f"Stat[{arg.inode.inumber}]"
+                return f"Stat[{arg.iNumber}]"
             else:
                 return repr(arg)
 
@@ -176,9 +236,6 @@ class Unix:
         while nextOfd in self.openFileTable:
             nextOfd += 1
         return nextOfd
-
-    # def makeProcess(self, parent: Process, code: Callable[Any, Any]):
-    #     Process(self.claimNextPid(), parent, "", parent.owner, parent.env.copy(), code)
 
     def getProcess(self, pid: PID):
         try:
@@ -222,13 +279,13 @@ class Unix:
         return checkModeSubset(mode, inode.permissions.other)
 
     def traversePath(self, pid: PID, path: str, op: INodeOperation) -> INode:
-        if not self.rootMount:
+        if not (fs := self.mounts["/"]):
             raise KernelError("No root mount found")
 
         process = self.getProcess(pid)
-        currentNode: INode = process.currentDir
+        currentNode: INode = fs.inodes[process.currentDir]
         if path.startswith("/"):
-            currentNode = self.rootMount
+            currentNode = fs.root()
 
         parts = path.rstrip("/").split("/")
         traversePath = parts
@@ -236,28 +293,28 @@ class Unix:
             traversePath = parts[:-1]
         for part in traversePath:
             if currentNode.fileType != FileType.DIRECTORY:
-                raise NotADirectoryError()
+                raise FileNotFoundError(path)
             self.access(pid, currentNode, Mode.EXEC)
             if part == "":
                 part = "."
 
             try:
-                currentNode = cast(DirectoryData, currentNode.data).children[part]
+                currentNode = fs.inodes[cast(DirectoryData, currentNode.data).children[part]]
             except KeyError:
-                raise FileNotFoundError(part) from None
+                raise FileNotFoundError(path) from None
 
         if op == INodeOperation.GET or op == INodeOperation.DELETE:
             return currentNode
         elif op == INodeOperation.CREATE:
             try:
-                return cast(DirectoryData, currentNode.data).children[parts[-1]]
+                return fs.inodes[cast(DirectoryData, currentNode.data).children[parts[-1]]]
             except KeyError:
                 pass
 
             self.access(pid, currentNode, Mode.WRITE)
-            child = INode(currentNode.permissions, FileType.NONE, process.uid, process.gid, datetime.now(),
-                          datetime.now(), INodeData())
-            cast(DirectoryData, currentNode.data).addChild(parts[-1], child)
+            child = INode(fs.claimNextINumber(), currentNode.permissions, FileType.NONE, process.uid, process.gid,
+                          datetime.now(), datetime.now(), INodeData())
+            cast(DirectoryData, currentNode.data).addChild(parts[-1], child.iNumber)
         else:
             raise NotImplementedError()
 
@@ -276,8 +333,8 @@ class Unix:
     def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
         process = self.getProcess(pid)
         childPid = self.claimNextPid()
-        childProcess = Process(childPid, process, command, process.realUid, process.realGid, process.currentDir,
-                               process.env)
+        childProcess = ProcessEntry(childPid, process, command, process.realUid, process.realGid, process.currentDir,
+                                    process.env)
         self.processes.add(childProcess)
 
         system = SystemHandle(childPid, self)
@@ -294,9 +351,12 @@ class Unix:
         return PID(childPid)
 
     @strace
-    def open(self, pid: PID, path: str, mode: FileMode) -> FD:
+    def open(self, pid: PID, path: str, mode: FileMode) -> Tuple[int, FD]:
         process = self.getProcess(pid)
-        inode = self.getINodeFromPath(pid, path)
+        try:
+            inode = self.getINodeFromPath(pid, path)
+        except FileNotFoundError:
+            return 1, FD(-1)
 
         if FileMode.READ in mode:
             self.access(pid, inode, Mode.READ)
@@ -306,9 +366,9 @@ class Unix:
 
         ofd = OpenFileDescriptor(self.claimNextOftId(), mode, inode)
         self.openFileTable.add(ofd)
-        processFdNum = process.claimNextFdNum()
+        processFdNum: FD = process.claimNextFdNum()
         process.fdTable.add(ProcessFileDescriptor(processFdNum, ofd))
-        return processFdNum
+        return 0, processFdNum
 
     @strace
     def lseek(self, pid: PID, fd: FD, offset: int, whence: SeekFrom) -> int:
@@ -327,30 +387,30 @@ class Unix:
         return ofdEntry.offset
 
     @strace
-    def read(self, pid: PID, fd: FD, size: int) -> str:
+    def read(self, pid: PID, fd: FD, size: int) -> Tuple[int, str]:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
 
         if FileMode.READ not in ofdEntry.mode:
-            raise BadFileNumberError()
+            return 1, ""
 
         data = ofdEntry.file.data.read(size, ofdEntry.offset)
         ofdEntry.offset += len(data)
-        return data
+        return 0, data
 
     @strace
-    def write(self, pid: PID, fd: FD, data: str) -> int:
+    def write(self, pid: PID, fd: FD, data: str) -> Tuple[int, int]:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
 
         if FileMode.WRITE not in ofdEntry.mode:
-            raise BadFileNumberError()
+            return 1, 0
 
         numBytes = ofdEntry.file.data.write(data, ofdEntry.offset)
         ofdEntry.offset += numBytes
-        return numBytes
+        return 0, numBytes
 
     @strace
     def close(self, pid: PID, fd: FD) -> int:
@@ -371,22 +431,22 @@ class Unix:
         pass
 
     @strace
-    def stat(self, pid: PID, path: str) -> Stat:
+    def stat(self, pid: PID, path: str) -> Tuple[int, Stat]:
         inode = self.getINodeFromPath(pid, path)
-        return Stat(inode, inode.permissions, inode.fileType, inode.owner, inode.group, inode.timeCreated,
-                    inode.timeModified, inode.deviceNumber, inode.references)
+        return 0, Stat(inode.iNumber, inode.permissions, inode.fileType, inode.owner, inode.group, inode.data.size(),
+                       inode.timeCreated, inode.timeModified, inode.deviceNumber, inode.references)
 
     @strace
-    def getdents(self, pid: PID, fd: FD) -> List[DirEnt]:
+    def getdents(self, pid: PID, fd: FD) -> Tuple[int, List[DirEnt]]:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
         if ofdEntry.file.fileType != FileType.DIRECTORY:
-            raise KernelError("Not a directory")
+            return 2, []
         out: List[DirEnt] = []
         for name, child in cast(DirectoryData, ofdEntry.file.data).children.items():
             out.append(DirEnt(name, child))
-        return out
+        return 0, out
 
     @strace
     def chdir(self, pid: PID, path: str) -> None:
@@ -489,7 +549,7 @@ class Unix:
 
         childName: str = ""
         for name, child in cast(DirectoryData, parentInode.data).children.items():
-            if child.inumber == childInode.inumber:
+            if child.iNumber == childInode.iNumber:
                 childName = name
                 break
         else:
@@ -518,37 +578,10 @@ class Unix:
     def symlink(self, pid: PID, target: str, alias: str) -> int:
         pass
 
-    @staticmethod
-    def getUsers(etcPasswd: RegularFileData):
-        def parsePasswd(userString: str):
-            fields = userString.split(":")
-            try:
-                name, password, uid, gid, info, home, shell = fields
-                uid = UID(int(uid))
-                gid = GID(int(gid))
-            except ValueError:
-                return None
-
-            return User(name, password, uid, gid, info, home, shell)
-
-        users: List[User] = []
-        for line in etcPasswd.read():
-            user = parsePasswd(line)
-            if not user:
-                continue
-            users.append(user)
-        return users
-
-    def getRootMount(self) -> INode:
-        try:
-            return self.mounts["/"]
-        except KeyError:
-            raise KernelError("No root mount") from None
-
-    def mount(self, path: str, directory: INode):
+    def mount(self, path: str, fs: Filesystem):
         if not path.startswith("/"):
             raise KernelError("Mount paths must be absolute")
-        self.mounts[path] = directory
+        self.mounts[path] = fs
 
     def startup(self):
         # self.mount("/", makeRoot())
@@ -563,18 +596,21 @@ class Unix:
         # swapper.parent = swapper
         # init = swapper.makeChild(1, "init")
 
-        self.rootMount = makeRoot()
-        devDir = makeDev(self)
-        cast(DirectoryData, devDir.data).addChild("..", self.rootMount)
-        self.rootMount.references += 1
-        cast(DirectoryData, self.rootMount.data).addChild("dev", devDir)
-        devDir.references += 1
+        rootFs = makeRoot()
+        self.mount("/", rootFs)
+        self.rootMount = rootFs.root()
+        # devFs = makeDev(self)
+        # cast(DirectoryData, devFs.root()).addChild("..", self.rootMount)
+        # self.rootMount.references += 1
+        # cast(DirectoryData, self.rootMount.data).addChild("dev", devDir)
+        # devDir.references += 1
 
-        swapper = Process(self.claimNextPid(), None, "swapper", self.rootUser.uid, self.rootUser.gid, self.rootMount,
-                          Environment())
+        swapper = ProcessEntry(self.claimNextPid(), None, "swapper", self.rootUser.uid, self.rootUser.gid,
+                               self.rootMount.iNumber, Environment())
         swapper.parent = swapper
 
         self.processes.add(swapper)
 
-        shell = Process(self.claimNextPid(), swapper, "/usr/csh", UID(128), GID(128), self.rootMount, Environment())
+        shell = ProcessEntry(self.claimNextPid(), swapper.pid, "/usr/csh", UID(128), GID(128), self.rootMount.iNumber,
+                             Environment())
         self.processes.add(shell)

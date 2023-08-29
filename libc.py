@@ -23,6 +23,12 @@ class Libc:
     def readline(self) -> str:
         return input()
 
+    def readAll(self, fd: FD) -> str:
+        text = ""
+        while len(data := self.system.read(fd, 1000)) > 0:
+            text += data
+        return text
+
     def open(self, path: str, mode: FileMode = FileMode.READ) -> FD:
         return self.system.open(path, mode)
 

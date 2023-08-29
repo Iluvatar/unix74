@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, IntFlag, auto
 from typing import Dict
 
+from self_keyed_dict import SelfKeyedDict
 from user import GID, UID
 
 if typing.TYPE_CHECKING:
@@ -18,6 +19,9 @@ class INodeException(Exception):
 
 class FilesystemError(Exception):
     pass
+
+
+INumber = typing.NewType("INumber", int)
 
 
 class FileType(Enum):
@@ -109,6 +113,7 @@ class FilePermissions:
 
 @dataclass
 class INode:
+    iNumber: INumber
     permissions: FilePermissions
     fileType: FileType
     owner: UID
@@ -119,9 +124,11 @@ class INode:
     deviceNumber: int = -1
     references: int = 1
 
-    @property
-    def inumber(self):
-        return id(self)
+    def __str__(self):
+        return f"[INode {self.permissions}, {self.fileType}, {self.owner}:{self.group}]"
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class INodeData:
@@ -144,26 +151,26 @@ class INodeData:
 
 
 class DirectoryData(INodeData):
-    def __init__(self, children: Dict[str, INode] | None = None):
+    def __init__(self, children: Dict[str, INumber] | None = None):
         super().__init__()
         if children is None:
             children = {}
-        self.children: Dict[str, INode] = children
+        self.children: Dict[str, INumber] = children
         self.__makeData()
 
     def __makeData(self):
         self.data = ""
-        for name, inode in self.children.items():
-            self.data += f"{name}{inode.inumber}"
+        for name, inumber in self.children.items():
+            self.data += f"{name}{inumber}"
 
-    def addChildren(self, children: Dict[str, INode]):
-        for name, child in children.items():
-            self.addChild(name, child)
+    def addChildren(self, children: Dict[str, INumber]):
+        for name, inumber in children.items():
+            self.addChild(name, inumber)
 
-    def addChild(self, name: str, child: INode):
+    def addChild(self, name: str, inumber: INumber):
         if name == "":
             raise FilesystemError("File names cannot be empty")
-        self.children[name] = child
+        self.children[name] = inumber
         self.__makeData()
 
     def removeChild(self, name: str):
@@ -202,3 +209,29 @@ class SpecialFileData(INodeData):
 
     def append(self, data):
         raise NotImplementedError()
+
+
+class Filesystem:
+    def __init__(self):
+        self.inodes: SelfKeyedDict[INode, INumber] = SelfKeyedDict("iNumber")
+        self.rootINum: INumber | None = None
+        self.nextINumber: INumber = INumber(1)
+
+    def claimNextINumber(self) -> INumber:
+        iNumber = self.nextINumber
+        if self.rootINum is None:
+            self.rootINum = iNumber
+        self.nextINumber += 1
+        return iNumber
+
+    def root(self) -> INode | None:
+        if self.rootINum:
+            return self.inodes[self.rootINum]
+        return None
+
+    def add(self, inode: INode):
+        self.inodes.add(inode)
+        return inode
+
+    def __len__(self):
+        return len(self.inodes)

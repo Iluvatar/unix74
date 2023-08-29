@@ -48,6 +48,7 @@ class Ps(ProcessCode):
             if isLong:
                 return f"{uid: <8} {pid: >5} {tty: <3} {time: >5} {command}\n"
             else:
+                command = command.split()[0]
                 return f"{pid: >5} {tty: <3} {time: >5} {command}\n"
 
         self.libc.printf(formatRow("PID", "USER", "TTY", "TIME", "COMMAND", longFlag))

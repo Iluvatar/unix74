@@ -1,14 +1,14 @@
+import sys
+from time import sleep
 from typing import Dict, Type
 
 from libc import Libc
-from process.process import PID
+from process.file_descriptor import PID
+from process.process import OsProcess
 from process.process_code import ProcessCode
 from unix import SystemHandle, Unix
 from usr.cat import Cat
 from usr.ls import Ls
-from usr.mv import Mv
-from usr.ps import Ps
-from usr.pwd import Pwd
 
 variables = {
     "HOME": "/usr/aero",
@@ -17,14 +17,63 @@ variables = {
     "PS1": r"[\u@\h \W]\$ "
 }
 
-unix = Unix()
-unix.startup()
+
+class Terminal(ProcessCode):
+    def run(self):
+        sys.stdin = open(0)
+        while True:
+            try:
+                line = input("$ ")
+            except KeyboardInterrupt:
+                self.libc.printf("\n")
+                continue
+            except EOFError:
+                self.libc.printf("\n")
+                break
+
+            if not line:
+                continue
+
+            tokens = line.split()
+            command = tokens[0]
+            args = tokens[1:]
+
+            commandDict: Dict[str, Type[ProcessCode]] = {
+                "ls": Ls,
+                "cat": Cat,
+            }
+
+            if command in commandDict:
+                p = OsProcess(commandDict[command](self.system, self.libc, args), [])
+                p.run()
+                sleep(1)
+            else:
+                self.libc.printf("Invalid command\n")
+
+
+if __name__ == "__main__":
+    unix = Unix()
+    unix.startup()
+
+    system = SystemHandle(PID(1), unix.lock, unix.userPipe)
+    libc = Libc(system)
+
+    cat = OsProcess(Cat(system, libc, ["/usr/liz/note.txt"]), [])
+    ls = OsProcess(Ls(system, libc, ["/usr/liz/"]), [])
+
+    terminal = OsProcess(Terminal(system, libc, []), [])
+    terminal.run()
+
+    unix.run()
+
 # for p in unix.processes:
 #     print(p)
-shell = unix.processes[PID(1)]
-system = SystemHandle(shell.pid, unix)
-libc = Libc(system)
+# shell = unix.processes[PID(1)]
+# system = SystemHandle(shell.pid, unix)
+# libc = Libc(system)
 
+
+"""
 try:
     while True:
         # print(unix)
@@ -63,8 +112,10 @@ try:
                     system.chdir(path)
                 except FileNotFoundError:
                     libc.printf(f"{path}: No such file or directory\n")
+            elif command == "pwd":
+                system.fork(commandDict[command], i, args)
             elif command in commandDict:
-                system.fork(commandDict[command], command, args)
+                commandDict[command](system, libc, args).run()
             else:
                 libc.printf(f"{command}: Command not found.\n")
         except PermissionError:
@@ -72,6 +123,7 @@ try:
 except KeyboardInterrupt:
     libc.printf("\n")
     pass
+"""
 
 # fd = handle.open("/usr/liz/note.txt", FileMode.READ)
 # fd2 = handle.open("/usr/liz", FileMode.READ)

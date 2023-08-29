@@ -37,7 +37,7 @@ class OpenFileDescriptor:
     offset: int = 0
 
     def __str__(self):
-        return f"[id: {self.id}, mode: {self.mode}, inode: {self.file.inumber}, refs: {self.refCount}, offset: {self.offset}]"
+        return f"[id: {self.id}, mode: {self.mode}, inode: {self.file.iNumber}, refs: {self.refCount}, offset: {self.offset}]"
 
 
 @dataclass

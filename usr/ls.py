@@ -1,7 +1,8 @@
 import datetime
 from typing import Dict, List
 
-from filesystem.filesystem import FileType, INode, Mode, SetId
+from filesystem.filesystem import FileType, Mode, SetId
+from filesystem.filesystem_utils import Stat
 from process.file_descriptor import FileMode
 from process.process_code import ProcessCode
 from user import GID, UID
@@ -63,7 +64,7 @@ class Ls(ProcessCode):
             contents = ""
             while len(data := self.system.read(passwdFd, 100)) > 0:
                 contents += data
-            self.system.close(passwdFd)
+            # self.system.close(passwdFd)
             lines = contents.split("\n")
             for line in lines:
                 parts = line.split(":")
@@ -83,7 +84,7 @@ class Ls(ProcessCode):
             contents = ""
             while len(data := self.system.read(groupFd, 100)) > 0:
                 contents += data
-            self.system.close(groupFd)
+            # self.system.close(groupFd)
             lines = contents.split("\n")
             for line in lines:
                 parts = line.split(":")
@@ -96,10 +97,10 @@ class Ls(ProcessCode):
 
             return groupDict
 
-        def permissionString(inode: INode) -> str:
-            perms = inode.permissions
+        def permissionString(stat: Stat) -> str:
+            perms = stat.permissions
 
-            s = fileTypeChar[inode.fileType]
+            s = fileTypeChar[stat.fileType]
             s += "r" if perms.owner & Mode.READ else "-"
             s += "w" if perms.owner & Mode.WRITE else "-"
             s += "s" if perms.high & SetId.SET_UID else "x" if perms.owner & Mode.EXEC else "-"
@@ -135,21 +136,22 @@ class Ls(ProcessCode):
                 continue
 
             entries = self.system.getdents(fd)
-            self.system.close(fd)
+            # self.system.close(fd)
 
             fullString: str = ""
 
             entryParts = []
             for entry in entries:
                 name = entry.name
-                inode = entry.inode
+                stat = self.system.stat(path + "/" + name)
 
-                permissions = permissionString(inode)
-                links = str(inode.references)
-                owner = userDict[inode.owner] if inode.owner in userDict else str(inode.owner)
-                group = groupDict[inode.group] if inode.group in groupDict else str(inode.group)
-                size = str(inode.data.size())
-                modified = formatTime(inode.timeModified)
+                permissions = permissionString(stat)
+                links = str(stat.references)
+                owner = userDict[stat.owner] if stat.owner in userDict else str(stat.owner)
+                group = groupDict[stat.group] if stat.group in groupDict else str(stat.group)
+                size = str(stat.size)
+                modified = formatTime(stat.timeModified)
+                iNumber = str(stat.iNumber)
                 entryParts.append({
                     "name": name,
                     "permissions": permissions,
@@ -158,9 +160,9 @@ class Ls(ProcessCode):
                     "group": group,
                     "size": size,
                     "modifiedStr": modified,
-                    "inode": str(inode.inumber),
-                    "type": inode.fileType,
-                    "modified": inode.timeModified,
+                    "iNumber": iNumber,
+                    "type": stat.fileType,
+                    "modified": stat.timeModified,
                 })
 
             if timeFlag:
@@ -168,10 +170,10 @@ class Ls(ProcessCode):
             else:
                 entryParts.sort(key=lambda e: e["name"], reverse=reverseFlag)
 
-            inodeLength = max([len(e["inode"]) for e in entryParts])
-            linksLength = max([len(e["links"]) for e in entryParts])
-            ownerLength = max([len(e["owner"]) for e in entryParts])
-            groupLength = max([len(e["group"]) for e in entryParts])
+            iNumberLength = max([len(e["iNumber"]) for e in entryParts], default=0)
+            linksLength = max([len(e["links"]) for e in entryParts], default=0)
+            ownerLength = max([len(e["owner"]) for e in entryParts], default=0)
+            groupLength = max([len(e["group"]) for e in entryParts], default=0)
 
             if len(paths) > 1:
                 fullString += f"{path}:\n"
@@ -182,7 +184,7 @@ class Ls(ProcessCode):
 
                 lineString = ""
                 if inodeFlag:
-                    lineString += f"{fileParts['inode']: >{inodeLength}} "
+                    lineString += f"{fileParts['iNumber']: >{iNumberLength}} "
 
                 if longFlag:
                     lineString += f"{fileParts['permissions']} "

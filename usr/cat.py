@@ -4,6 +4,7 @@ from process.process_code import ProcessCode
 
 class Cat(ProcessCode):
     def run(self) -> int:
+
         def readFromInput():
             try:
                 while True:
@@ -22,14 +23,11 @@ class Cat(ProcessCode):
 
             try:
                 fd = self.system.open(file, FileMode.READ)
-            except FileNotFoundError:
+            except ValueError:
                 self.libc.printf(f"{file}: No such file or directory\n")
                 continue
 
-            out = ""
-            while len(data := self.system.read(fd, 100)) > 0:
-                out += data
-
-            self.libc.printf(out)
+            data = self.libc.readAll(fd)
+            self.libc.printf(data)
 
         return 0

@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import DefaultDict
 
 from filesystem.dev_files import DevConsole, DevNull, Mem
-from filesystem.filesystem import DirectoryData, FilePermissions, FileType, INode, INodeData, Mode, RegularFileData, \
-    SetId
+from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, INumber, Mode, \
+    RegularFileData, SetId
 from user import GID, UID
 
 if typing.TYPE_CHECKING:
@@ -34,9 +34,10 @@ def loadFile(path: str) -> RegularFileData:
     return RegularFileData(data)
 
 
-def makeChild(parent: INode, name: str, filetype: FileType, data: INodeData, *,
+def makeChild(fs: Filesystem, parentINum: INumber, name: str, filetype: FileType, data: INodeData, *,
               permissions: FilePermissions | None = None, owner: UID | None = None, group: GID | None = None,
-              timeCreated: datetime | None = None, timeModified: datetime | None = None):
+              timeCreated: datetime | None = None, timeModified: datetime | None = None) -> INumber:
+    parent = fs.inodes[parentINum]
     if permissions is None:
         permissions = parent.permissions.copy()
     if owner is None:
@@ -48,28 +49,32 @@ def makeChild(parent: INode, name: str, filetype: FileType, data: INodeData, *,
     if timeModified is None:
         timeModified = timeCreated
 
-    child = INode(permissions, filetype, owner, group, timeCreated, timeModified, data)
-    typing.cast(DirectoryData, parent.data).addChild(name, child)
-    return child
+    child = fs.add(INode(fs.claimNextINumber(), permissions, filetype, owner, group, timeCreated, timeModified, data))
+    typing.cast(DirectoryData, parent.data).addChild(name, child.iNumber)
+    return child.iNumber
 
 
-def makeChildDir(parent: INode, name: str, *, permissions: FilePermissions | None = None, owner: UID | None = None,
-                 group: GID | None = None, timeCreated: datetime | None = None,
-                 timeModified: datetime | None = None) -> INode:
-    child = makeChild(parent, name, FileType.DIRECTORY, DirectoryData(), permissions=permissions, owner=owner,
-                      group=group, timeCreated=timeCreated, timeModified=timeModified)
+def makeChildDir(fs: Filesystem, parentINum: INumber, name: str, *, permissions: FilePermissions | None = None,
+                 owner: UID | None = None, group: GID | None = None, timeCreated: datetime | None = None,
+                 timeModified: datetime | None = None) -> INumber:
+    parent = fs.inodes[parentINum]
+    childINum = makeChild(fs, parentINum, name, FileType.DIRECTORY, DirectoryData(), permissions=permissions,
+                          owner=owner, group=group, timeCreated=timeCreated, timeModified=timeModified)
+    child = fs.inodes[childINum]
     typing.cast(DirectoryData, child.data).addChildren({
-        ".": child,
-        "..": parent
+        ".": childINum,
+        "..": parentINum,
     })
     child.references = 2
     parent.references += 1
-    return child
+    return childINum
 
 
-def makeChildFile(parent: INode, name: str, data: INodeData, *, permissions: FilePermissions | None = None,
-                  owner: UID | None = None, group: GID | None = None, filetype: FileType | None = None,
-                  timeCreated: datetime | None = None, timeModified: datetime | None = None) -> INode:
+def makeChildFile(fs: Filesystem, parentINum: INumber, name: str, data: INodeData, *,
+                  permissions: FilePermissions | None = None, owner: UID | None = None, group: GID | None = None,
+                  filetype: FileType | None = None, timeCreated: datetime | None = None,
+                  timeModified: datetime | None = None) -> INumber:
+    parent = fs.inodes[parentINum]
     if filetype == FileType.DIRECTORY:
         raise ValueError("use makeChildDir() for directories")
     elif filetype is None:
@@ -82,71 +87,80 @@ def makeChildFile(parent: INode, name: str, data: INodeData, *, permissions: Fil
         permissions.modifyPermissions(FilePermissions.PermGroup.GROUP, FilePermissions.Op.REM, Mode.EXEC)
         permissions.modifyPermissions(FilePermissions.PermGroup.OTHER, FilePermissions.Op.REM, Mode.EXEC)
 
-    return makeChild(parent, name, filetype, data, permissions=permissions, owner=owner, group=group,
+    return makeChild(fs, parentINum, name, filetype, data, permissions=permissions, owner=owner, group=group,
                      timeCreated=timeCreated, timeModified=timeModified)
 
 
-def makeEtc(root: INode) -> INode:
-    etcDir = makeChildDir(root, "etc")
+def makeEtc(fs: Filesystem, rootINum: INumber) -> INumber:
+    etcDirINum = makeChildDir(fs, rootINum, "etc")
 
-    makeChildFile(etcDir, "passwd", loadFile("root/etc/passwd"), permissions=FilePermissions(0o644))
-    makeChildFile(etcDir, "group", loadFile("root/etc/group"), permissions=FilePermissions(0o644))
+    makeChildFile(fs, etcDirINum, "passwd", loadFile("root/etc/passwd"), permissions=FilePermissions(0o644))
+    makeChildFile(fs, etcDirINum, "group", loadFile("root/etc/group"), permissions=FilePermissions(0o644))
 
-    return etcDir
+    return etcDirINum
 
 
-def makeLizHome(usrDir: INode) -> None:
+def makeLizHome(fs: Filesystem, usrDirINum: INumber) -> None:
     lizCreatedTime = datetime(1974, 12, 2, 1, 24, 13, 989)
-    lizHomeDir = makeChildDir(usrDir, "liz", owner=users["liz"], group=groups["liz"], timeCreated=lizCreatedTime)
-    makeChildFile(lizHomeDir, "note.txt", loadFile("root/usr/liz/note.txt"))
+    lizHomeDirINum = makeChildDir(fs, usrDirINum, "liz", owner=users["liz"], group=groups["liz"],
+                                  timeCreated=lizCreatedTime)
+    makeChildFile(fs, lizHomeDirINum, "note.txt", loadFile("root/usr/liz/note.txt"))
 
 
-def makeMurtaughHome(usrDir: INode) -> None:
+def makeMurtaughHome(fs: Filesystem, usrDirINum: INumber) -> None:
     murtaughCreatedTime = datetime(1974, 12, 18, 19, 1, 37, 182)
-    murtaughHomeDir = makeChildDir(usrDir, "murtaugh", owner=users["murtaugh"], group=groups["murtaugh"],
-                                   timeCreated=murtaughCreatedTime)
-    makeChildFile(murtaughHomeDir, "cat.txt", loadFile("root/usr/murtaugh/cat.txt"),
+    murtaughHomeDirINum = makeChildDir(fs, usrDirINum, "murtaugh", owner=users["murtaugh"], group=groups["murtaugh"],
+                                       timeCreated=murtaughCreatedTime)
+    makeChildFile(fs, murtaughHomeDirINum, "cat.txt", loadFile("root/usr/murtaugh/cat.txt"),
                   timeCreated=datetime(1975, 10, 14, 10, 58, 45, 619))
-    makeChildFile(murtaughHomeDir, "liz.txt", loadFile("root/usr/murtaugh/liz.txt"),
+    makeChildFile(fs, murtaughHomeDirINum, "liz.txt", loadFile("root/usr/murtaugh/liz.txt"),
                   timeCreated=datetime(1976, 3, 26, 17, 12, 42, 107))
-    makeChildFile(murtaughHomeDir, "myself.txt", loadFile("root/usr/murtaugh/myself.txt"),
+    makeChildFile(fs, murtaughHomeDirINum, "myself.txt", loadFile("root/usr/murtaugh/myself.txt"),
                   timeCreated=datetime(1976, 12, 13, 12, 51, 9, 588))
-    makeChildFile(murtaughHomeDir, "diary1.txt", loadFile("root/usr/murtaugh/diary1.txt"),
+    makeChildFile(fs, murtaughHomeDirINum, "diary1.txt", loadFile("root/usr/murtaugh/diary1.txt"),
                   timeCreated=datetime(1977, 1, 8, 9, 2, 54, 184))
-    makeChildFile(murtaughHomeDir, "diary2.txt", loadFile("root/usr/murtaugh/diary2.txt"),
+    makeChildFile(fs, murtaughHomeDirINum, "diary2.txt", loadFile("root/usr/murtaugh/diary2.txt"),
                   timeCreated=datetime(1977, 1, 8, 9, 2, 54, 184))
-    makeChildFile(murtaughHomeDir, "portal.txt", loadFile("root/usr/murtaugh/portal.txt"),
+    makeChildFile(fs, murtaughHomeDirINum, "portal.txt", loadFile("root/usr/murtaugh/portal.txt"),
                   timeCreated=datetime(1977, 1, 8, 18, 17, 22, 374))
 
 
-def makeRoot():
-    root = INode(FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"], origTime, origTime,
-                 DirectoryData())
+def makeRoot() -> Filesystem:
+    fs = Filesystem()
+
+    root = fs.add(
+        INode(fs.claimNextINumber(), FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"],
+              origTime, origTime, DirectoryData()))
     typing.cast(DirectoryData, root.data).addChildren({
-        ".": root,
-        "..": root
+        ".": root.iNumber,
+        "..": root.iNumber,
     })
     root.references = 2
 
-    binDir = makeChildDir(root, "bin")
-    etcDir = typing.cast(DirectoryData, root.data).addChild("etc", makeEtc(root))
-    usrDir = makeChildDir(root, "usr")
-    tmpDir = makeChildDir(root, "tmp", permissions=FilePermissions(0o1777))
-    varDir = makeChildDir(root, "var")
+    binDir = makeChildDir(fs, root.iNumber, "bin")
+    etcDir = typing.cast(DirectoryData, root.data).addChild("etc", makeEtc(fs, root.iNumber))
+    usrDir = makeChildDir(fs, root.iNumber, "usr")
+    tmpDir = makeChildDir(fs, root.iNumber, "tmp", permissions=FilePermissions(0o1777))
+    varDir = makeChildDir(fs, root.iNumber, "var")
 
-    makeLizHome(usrDir)
-    makeMurtaughHome(usrDir)
+    makeLizHome(fs, usrDir)
+    makeMurtaughHome(fs, usrDir)
 
-    return root
+    return fs
 
 
-def makeDev(unix: Unix):
-    devDir = INode(FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"], origTime, origTime,
-                   DirectoryData())
-    typing.cast(DirectoryData, devDir.data).addChild(".", devDir)
+def makeDev(unix: Unix) -> Filesystem:
+    fs = Filesystem()
 
-    makeChildFile(devDir, "null", DevNull(unix), filetype=FileType.CHARACTER, permissions=FilePermissions(0o666))
-    makeChildFile(devDir, "console", DevConsole(unix), filetype=FileType.CHARACTER, permissions=FilePermissions(0o666))
-    makeChildFile(devDir, "mem", Mem(unix), filetype=FileType.CHARACTER, permissions=FilePermissions(0o666))
+    devDir = fs.add(
+        INode(fs.claimNextINumber(), FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"],
+              origTime, origTime, DirectoryData()))
+    typing.cast(DirectoryData, devDir.data).addChild(".", devDir.iNumber)
 
-    return devDir
+    makeChildFile(fs, devDir.iNumber, "null", DevNull(unix), filetype=FileType.CHARACTER,
+                  permissions=FilePermissions(0o666))
+    makeChildFile(fs, devDir.iNumber, "console", DevConsole(unix), filetype=FileType.CHARACTER,
+                  permissions=FilePermissions(0o666))
+    makeChildFile(fs, devDir.iNumber, "mem", Mem(unix), filetype=FileType.CHARACTER, permissions=FilePermissions(0o666))
+
+    return fs
