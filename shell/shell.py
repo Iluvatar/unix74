@@ -86,7 +86,7 @@ class Shell:
             threads = []
 
             def runAndClose(command, cin, cout, stderr):
-                ret = command.run(cin, cout, stderr)
+                ret = command.start(cin, cout, stderr)
                 cin.close()
                 cout.close()
                 return ret

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from enum import Enum, auto
 from multiprocessing import Lock, Pipe
 from multiprocessing.connection import Connection
 from threading import Thread
@@ -19,8 +20,21 @@ from self_keyed_dict import SelfKeyedDict
 from user import GID, Group, GroupName, GroupPassword, Password, UID, User, UserName
 
 
+class Errno(Enum):
+    NONE = 0
+    PERMISSION = auto()
+    NO_ACCESS = auto()
+    NO_SUCH_FILE = auto()
+    IS_A_DIR = auto()
+    NOT_A_DIR = auto()
+    INVALID_ARG = auto()
+    FUNC_NOT_IMPLEMENTED = auto()
+
+
 class KernelError(Exception):
-    pass
+    def __init__(self, message: str, errno: Errno):
+        super(KernelError, self).__init__(message)
+        self.errno = errno
 
 
 UserId = NewType('UserId', int)
@@ -28,27 +42,12 @@ GroupId = NewType('GroupId', int)
 
 
 class SystemHandle:
-    # def __init__(self, pid: PID, unix: Unix):
-    #     self.__pid = pid
-    #     self.__unix = unix
-
     def __init__(self, pid: PID, lock: Lock, pipe: Connection):
         self.pid = pid
         self.lock = lock
         self.pipe = pipe
 
-    """
-    # def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
-    #     return self.__unix.fork(self.__pid, child, command, argv)
-    #
-    # def open(self, path: str, mode: FileMode) -> FD:
-    #     return self.__unix.open(self.__pid, path, mode)
-    #
-    # def lseek(self, fd: FD, offset: int, whence: SeekFrom) -> int:
-    #     return self.__unix.lseek(self.__pid, fd, offset, whence)
-    """
-
-    def syscall(self, name: str, *args):
+    def __syscall(self, name: str, *args):
         with self.lock:
             self.pipe.send((name, self.pid, *args))
             ret = self.pipe.recv()
@@ -57,84 +56,19 @@ class SystemHandle:
             return ret[1]
 
     def open(self, path: str, mode: FileMode) -> FD:
-        return self.syscall("open", path, mode)
+        return self.__syscall("open", path, mode)
 
     def read(self, fd: FD, size: int) -> str:
-        return self.syscall("read", fd, size)
+        return self.__syscall("read", fd, size)
 
     def write(self, fd: FD, data: str) -> int:
-        return self.syscall("write", fd, data)
+        return self.__syscall("write", fd, data)
 
     def stat(self, path: str) -> Stat:
-        return self.syscall("stat", path)
+        return self.__syscall("stat", path)
 
     def getdents(self, fd: FD) -> List[DirEnt]:
-        return self.syscall("getdents", fd)
-
-    """
-    # def close(self, fd: FD) -> int:
-    #     return self.__unix.close(self.__pid, fd)
-    # 
-    # def pipe(self) -> (FD, FD):
-    #     return self.__unix.pipe(self.__pid)
-    # 
-    # def stat(self, path: str) -> Stat:
-    #     return self.__unix.stat(self.__pid, path)
-    # 
-    # def getdents(self, fd: FD) -> List[DirEnt]:
-    #     return self.__unix.getdents(self.__pid, fd)
-    # 
-    # def chdir(self, path: str) -> None:
-    #     return self.__unix.chdir(self.__pid, path)
-    # 
-    # def chmod(self, path: str, permissions: FilePermissions) -> int:
-    #     return self.__unix.chmod(self.__pid, path, permissions)
-    # 
-    # def chown(self, path: str, owner: UID, group: GID) -> int:
-    #     return self.__unix.chown(self.__pid, path, owner, group)
-    # 
-    # def getuid(self) -> UID:
-    #     return self.__unix.getuid(self.__pid)
-    # 
-    # def geteuid(self) -> UID:
-    #     return self.__unix.geteuid(self.__pid)
-    # 
-    # def setuid(self, uid: UID) -> int:
-    #     return self.__unix.setuid(self.__pid, uid)
-    # 
-    # def getgid(self) -> GID:
-    #     return self.__unix.getgid(self.__pid)
-    # 
-    # def getegid(self) -> GID:
-    #     return self.__unix.getegid(self.__pid)
-    # 
-    # def setgid(self, gid: GID) -> int:
-    #     return self.__unix.setgid(self.__pid, gid)
-    # 
-    # def getpid(self) -> PID:
-    #     return self.__unix.getpid(self.__pid)
-    # 
-    # def gettimeofday(self, time: int) -> int:
-    #     return self.__unix.gettimeofday(self.__pid, time)
-    # 
-    # def link(self, target: str, alias: str) -> None:
-    #     return self.__unix.link(self.__pid, target, alias)
-    # 
-    # def unlink(self, target: str) -> None:
-    #     return self.__unix.unlink(self.__pid, target)
-    # 
-    # def mkdir(self, path: str, permissions: FilePermissions) -> int:
-    #     return self.__unix.mkdir(self.__pid, path, permissions)
-    # 
-    # def rename(self, path: str, to: str) -> int:
-    #     return self.__unix.rename(self.__pid, path, to)
-    # 
-    # def rmdir(self, path: str) -> int:
-    #     return self.__unix.rmdir(self.__pid, path)
-    # 
-    # def symlink(self, target: str, alias: str) -> int:
-    #     return self.__unix.symlink(self.__pid, target, alias)
-"""
+        return self.__syscall("getdents", fd)
 
 
 class Unix:
@@ -171,11 +105,14 @@ class Unix:
 
         return out
 
+    def syscallReturn(self, errno: Errno, value):
+        self.kernelPipe.send((errno, value))
+
     def doSyscall(self, function: Callable, pid: PID, *args):
         ret = function(pid, *args)
-        self.kernelPipe.send(ret)
+        self.syscallReturn(Errno.NONE, ret)
 
-    def run(self):
+    def start(self):
         syscallDict = {
             "open": self.open,
             "read": self.read,
@@ -194,9 +131,11 @@ class Unix:
                 if syscall in syscallDict:
                     self.doSyscall(syscallDict[syscall], pid, *args)
                 else:
-                    self.kernelPipe.send((1, f"Invalid syscall {syscall}"))
+                    self.syscallReturn(Errno.FUNC_NOT_IMPLEMENTED, f"Invalid syscall {syscall}")
             except TypeError:
-                self.kernelPipe.send((2, "Invalid arguments"))
+                self.syscallReturn(Errno.INVALID_ARG, "Invalid arguments")
+            except KernelError as e:
+                self.syscallReturn(e.errno, str(e))
 
     @staticmethod
     def strace(func):
@@ -262,7 +201,7 @@ class Unix:
     def access(self, pid: PID, inode: INode, mode: Mode) -> bool:
         def checkModeSubset(m: Mode, inodeMode: Mode):
             if m not in inodeMode:
-                raise PermissionError(f"Mode requested {m}, actual is {inodeMode}")
+                raise KernelError(f"Mode requested {m}, actual is {inodeMode}", Errno.NO_ACCESS)
             else:
                 return True
 
@@ -270,7 +209,7 @@ class Unix:
         if self.isSuperUser(process.uid):
             if Mode.EXEC in mode and Mode.EXEC not in (
                     inode.permissions.owner | inode.permissions.group | inode.permissions.other):
-                raise PermissionError()
+                raise KernelError("", Errno.NO_ACCESS)
             return True
         if process.uid == inode.owner:
             return checkModeSubset(mode, inode.permissions.owner)
@@ -280,7 +219,7 @@ class Unix:
 
     def traversePath(self, pid: PID, path: str, op: INodeOperation) -> INode:
         if not (fs := self.mounts["/"]):
-            raise KernelError("No root mount found")
+            raise KernelError("No root mount found", Errno.NO_SUCH_FILE)
 
         process = self.getProcess(pid)
         currentNode: INode = fs.inodes[process.currentDir]
@@ -293,7 +232,7 @@ class Unix:
             traversePath = parts[:-1]
         for part in traversePath:
             if currentNode.fileType != FileType.DIRECTORY:
-                raise FileNotFoundError(path)
+                raise KernelError(f"No such file ro directory: {path}", Errno.NO_SUCH_FILE)
             self.access(pid, currentNode, Mode.EXEC)
             if part == "":
                 part = "."
@@ -301,7 +240,7 @@ class Unix:
             try:
                 currentNode = fs.inodes[cast(DirectoryData, currentNode.data).children[part]]
             except KeyError:
-                raise FileNotFoundError(path) from None
+                raise KernelError(f"No such file ro directory: {path}", Errno.NO_SUCH_FILE)
 
         if op == INodeOperation.GET or op == INodeOperation.DELETE:
             return currentNode
@@ -316,7 +255,7 @@ class Unix:
                           datetime.now(), datetime.now(), INodeData())
             cast(DirectoryData, currentNode.data).addChild(parts[-1], child.iNumber)
         else:
-            raise NotImplementedError()
+            raise KernelError(f"Invalid op: {op}", Errno.FUNC_NOT_IMPLEMENTED)
 
     def getINodeFromPath(self, pid: PID, path: str) -> INode:
         return self.traversePath(pid, path, INodeOperation.GET)
@@ -351,12 +290,12 @@ class Unix:
         return PID(childPid)
 
     @strace
-    def open(self, pid: PID, path: str, mode: FileMode) -> Tuple[int, FD]:
+    def open(self, pid: PID, path: str, mode: FileMode) -> FD:
         process = self.getProcess(pid)
         try:
             inode = self.getINodeFromPath(pid, path)
         except FileNotFoundError:
-            return 1, FD(-1)
+            raise KernelError(f"No such file or directory: {path}", Errno.NO_SUCH_FILE)
 
         if FileMode.READ in mode:
             self.access(pid, inode, Mode.READ)
@@ -368,7 +307,7 @@ class Unix:
         self.openFileTable.add(ofd)
         processFdNum: FD = process.claimNextFdNum()
         process.fdTable.add(ProcessFileDescriptor(processFdNum, ofd))
-        return 0, processFdNum
+        return processFdNum
 
     @strace
     def lseek(self, pid: PID, fd: FD, offset: int, whence: SeekFrom) -> int:
@@ -387,33 +326,33 @@ class Unix:
         return ofdEntry.offset
 
     @strace
-    def read(self, pid: PID, fd: FD, size: int) -> Tuple[int, str]:
+    def read(self, pid: PID, fd: FD, size: int) -> str:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
 
         if FileMode.READ not in ofdEntry.mode:
-            return 1, ""
+            raise KernelError("", Errno.NO_ACCESS)
 
         data = ofdEntry.file.data.read(size, ofdEntry.offset)
         ofdEntry.offset += len(data)
-        return 0, data
+        return data
 
     @strace
-    def write(self, pid: PID, fd: FD, data: str) -> Tuple[int, int]:
+    def write(self, pid: PID, fd: FD, data: str) -> int:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
 
         if FileMode.WRITE not in ofdEntry.mode:
-            return 1, 0
+            raise KernelError("", Errno.NO_ACCESS)
 
         numBytes = ofdEntry.file.data.write(data, ofdEntry.offset)
         ofdEntry.offset += numBytes
-        return 0, numBytes
+        return numBytes
 
     @strace
-    def close(self, pid: PID, fd: FD) -> int:
+    def close(self, pid: PID, fd: FD) -> None:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
@@ -424,29 +363,27 @@ class Unix:
 
         process.fdTable.remove(fd)
 
-        return 0
-
     @strace
     def pipe(self, pid: PID) -> (FD, FD):
         pass
 
     @strace
-    def stat(self, pid: PID, path: str) -> Tuple[int, Stat]:
+    def stat(self, pid: PID, path: str) -> Stat:
         inode = self.getINodeFromPath(pid, path)
-        return 0, Stat(inode.iNumber, inode.permissions, inode.fileType, inode.owner, inode.group, inode.data.size(),
-                       inode.timeCreated, inode.timeModified, inode.deviceNumber, inode.references)
+        return Stat(inode.iNumber, inode.permissions, inode.fileType, inode.owner, inode.group, inode.data.size(),
+                    inode.timeCreated, inode.timeModified, inode.deviceNumber, inode.references)
 
     @strace
-    def getdents(self, pid: PID, fd: FD) -> Tuple[int, List[DirEnt]]:
+    def getdents(self, pid: PID, fd: FD) -> List[DirEnt]:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
         if ofdEntry.file.fileType != FileType.DIRECTORY:
-            return 2, []
+            raise KernelError("", Errno.NOT_A_DIR)
         out: List[DirEnt] = []
         for name, child in cast(DirectoryData, ofdEntry.file.data).children.items():
             out.append(DirEnt(name, child))
-        return 0, out
+        return out
 
     @strace
     def chdir(self, pid: PID, path: str) -> None:
@@ -580,7 +517,7 @@ class Unix:
 
     def mount(self, path: str, fs: Filesystem):
         if not path.startswith("/"):
-            raise KernelError("Mount paths must be absolute")
+            raise KernelError("Mount paths must be absolute", Errno.INVALID_ARG)
         self.mounts[path] = fs
 
     def startup(self):

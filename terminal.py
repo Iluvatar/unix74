@@ -64,7 +64,7 @@ if __name__ == "__main__":
     terminal = OsProcess(Terminal(system, libc, []), [])
     terminal.run()
 
-    unix.run()
+    unix.start()
 
 # for p in unix.processes:
 #     print(p)
