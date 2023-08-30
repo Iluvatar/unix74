@@ -1,4 +1,5 @@
 import datetime
+from time import sleep
 from typing import Dict, List
 
 from filesystem.filesystem import FileType, Mode, SetId
@@ -18,6 +19,8 @@ class Ls(ProcessCode):
         inodeFlag: bool = False
         recursiveFlag: bool = False
         singleLineFlag: bool = False
+
+        sleep(1)
 
         while len(self.argv):
             arg = self.argv[0]
@@ -61,9 +64,7 @@ class Ls(ProcessCode):
         def getUidToUserDict() -> Dict[UID, str]:
             userDict: Dict[UID, str] = {}
             passwdFd = self.system.open("/etc/passwd", FileMode.READ)
-            contents = ""
-            while len(data := self.system.read(passwdFd, 100)) > 0:
-                contents += data
+            contents = self.libc.readAll(passwdFd)
             # self.system.close(passwdFd)
             lines = contents.split("\n")
             for line in lines:
@@ -81,9 +82,7 @@ class Ls(ProcessCode):
         def getGidToGroupDict() -> Dict[GID, str]:
             groupDict: Dict[GID, str] = {}
             groupFd = self.system.open("/etc/group", FileMode.READ)
-            contents = ""
-            while len(data := self.system.read(groupFd, 100)) > 0:
-                contents += data
+            contents = self.libc.readAll(groupFd)
             # self.system.close(groupFd)
             lines = contents.split("\n")
             for line in lines:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import typing
 from collections.abc import Callable, MutableSet
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from multiprocessing import Process
 from signal import Signals, signal
 from types import FrameType
@@ -19,6 +20,11 @@ if typing.TYPE_CHECKING:
     pass
 
 
+class ProcessStatus(Enum):
+    RUNNING = auto()
+    ZOMBIE = auto()
+
+
 @dataclass
 class ProcessEntry:
     pid: PID
@@ -30,6 +36,9 @@ class ProcessEntry:
     env: Environment
     uid: UID | None = None
     gid: GID | None = None
+    status: ProcessStatus = ProcessStatus.RUNNING
+    exitCode: int = 0
+    pythonPid: int = -1
     tty: int = -1
     fdTable: SelfKeyedDict[ProcessFileDescriptor, FD] = field(default_factory=lambda: SelfKeyedDict("id"))
     children: MutableSet[ProcessEntry] = field(default_factory=set)
@@ -56,28 +65,21 @@ class ProcessEntry:
         fds = ",".join([str(fd) for fd in self.fdTable])
         return f"['{self.command}', pid: {self.pid}, owner: {self.uid}, fd: [{fds}]]"
 
+    def __repr__(self):
+        return self.__str__()
 
-# class OsProcess:
-#     def __init__(self, unix: Unix, process: Process, code: ProcessCode):
-#         self.unix = unix
-#         self.process = process
-#         self.code = code
-#
-#     def run(self):
-#         self.code.run()
-#
-#         # clean up loose fds
-#         for fd in self.process.fdTable:
-#             ofd = self.unix.openFileTable[fd.openFd.id]
-#             ofd.refCount -= 1
-#             if ofd.refCount == 0:
-#                 self.unix.openFileTable.remove(ofd.id)
+
+SignalHandler = Tuple[Signals, Callable[[int, FrameType], None]]
 
 
 class OsProcess:
-    def __init__(self, code: ProcessCode, signalHandlers: List[Tuple[Signals, Callable[[int, FrameType], None]]]):
+    def __init__(self, code: ProcessCode, processEntry: ProcessEntry,
+                 signalHandlers: List[SignalHandler] | None = None):
+        self.signalHandlers: List[SignalHandler] = []
+        if signalHandlers is not None:
+            self.signalHandlers = signalHandlers
         self.code = code
-        self.signalHandlers = signalHandlers
+        self.processEntry = processEntry
         self.process: Process | None = None
 
     def run(self):
@@ -88,4 +90,9 @@ class OsProcess:
         for handler in self.signalHandlers:
             signal(handler[0], handler[1])
 
-        self.code.run()
+        try:
+            self.code.run()
+        except Exception as e:
+            print("Got error:", e)
+        finally:
+            self.code.system.exit(0)

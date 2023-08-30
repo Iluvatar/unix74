@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
+import signal
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum, auto
 from multiprocessing import Lock, Pipe
 from multiprocessing.connection import Connection
-from threading import Thread
+from time import sleep
 from typing import Any, Dict, List, NewType, Tuple, Type, cast
 
 from environment import Environment
@@ -14,10 +16,11 @@ from filesystem.filesystem_loader import makeRoot
 from filesystem.filesystem_utils import DirEnt, INodeOperation, Stat
 from libc import Libc
 from process.file_descriptor import FD, FileMode, OFD, OpenFileDescriptor, PID, SeekFrom
-from process.process import ProcessEntry, ProcessFileDescriptor
+from process.process import OsProcess, ProcessEntry, ProcessFileDescriptor, ProcessStatus
 from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
 from user import GID, Group, GroupName, GroupPassword, Password, UID, User, UserName
+from usr.sh import Sh
 
 
 class Errno(Enum):
@@ -29,6 +32,8 @@ class Errno(Enum):
     NOT_A_DIR = auto()
     INVALID_ARG = auto()
     FUNC_NOT_IMPLEMENTED = auto()
+    BAD_PID = auto()
+    NOT_A_CHILD = auto()
 
 
 class KernelError(Exception):
@@ -51,8 +56,8 @@ class SystemHandle:
         with self.lock:
             self.pipe.send((name, self.pid, *args))
             ret = self.pipe.recv()
-            if ret[0] != 0:
-                raise ValueError(ret[0])
+            if ret[0] != Errno.NONE:
+                raise ValueError(f"{ret[0]}: {repr(ret[1])}")
             return ret[1]
 
     def open(self, path: str, mode: FileMode) -> FD:
@@ -64,11 +69,37 @@ class SystemHandle:
     def write(self, fd: FD, data: str) -> int:
         return self.__syscall("write", fd, data)
 
+    def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
+        return self.__syscall("fork", child, command, argv)
+
     def stat(self, path: str) -> Stat:
         return self.__syscall("stat", path)
 
     def getdents(self, fd: FD) -> List[DirEnt]:
         return self.__syscall("getdents", fd)
+
+    def waitpid(self, pid: PID) -> int:
+        wait = [1]
+
+        def outer(w):
+            def handler(a, f):
+                w[0] = 0
+
+            return handler
+
+        ret = self.__syscall("waitpid", pid)
+
+        # process hasn't exited yet
+        if ret == 27:
+            signal.signal(signal.SIGCHLD, outer(wait))
+            while wait[0]:
+                sleep(.1)
+            signal.signal(signal.SIGCHLD, signal.default_int_handler)
+
+        return ret
+
+    def exit(self, exitCode: int) -> None:
+        self.__syscall("exit", exitCode)
 
 
 class Unix:
@@ -84,7 +115,7 @@ class Unix:
         self.lock = Lock()
         self.data = ""
 
-        self.doStrace: bool = False
+        self.doStrace: bool = True
 
     def __str__(self):
         out = "Unix74\n------\n"
@@ -117,8 +148,10 @@ class Unix:
             "open": self.open,
             "read": self.read,
             "write": self.write,
+            "fork": self.fork,
             "getdents": self.getdents,
             "stat": self.stat,
+            "waitpid": self.waitpid,
         }
 
         while True:
@@ -128,12 +161,14 @@ class Unix:
             args: Tuple[Any] = data[2:]
 
             try:
-                if syscall in syscallDict:
+                if syscall == "exit":
+                    self.exit(pid, *args)
+                elif syscall in syscallDict:
                     self.doSyscall(syscallDict[syscall], pid, *args)
                 else:
                     self.syscallReturn(Errno.FUNC_NOT_IMPLEMENTED, f"Invalid syscall {syscall}")
-            except TypeError:
-                self.syscallReturn(Errno.INVALID_ARG, "Invalid arguments")
+            except TypeError as e:
+                self.syscallReturn(Errno.INVALID_ARG, repr(e))
             except KernelError as e:
                 self.syscallReturn(e.errno, str(e))
 
@@ -146,6 +181,11 @@ class Unix:
             elif isinstance(arg, Stat):
                 arg = cast(Stat, arg)
                 return f"Stat[{arg.iNumber}]"
+            elif isinstance(arg, str):
+                maxLen = 50
+                if len(arg) > maxLen:
+                    return f'"{arg[:maxLen - 3]}..."'
+                return repr(arg)
             else:
                 return repr(arg)
 
@@ -180,7 +220,7 @@ class Unix:
         try:
             return self.processes[pid]
         except KeyError:
-            raise KernelError(f"No such process {pid}") from None
+            raise KernelError(f"No such process {pid}", Errno.BAD_PID) from None
 
     def isSuperUser(self, uid: UID):
         return uid == UID(0)
@@ -272,22 +312,16 @@ class Unix:
     def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
         process = self.getProcess(pid)
         childPid = self.claimNextPid()
-        childProcess = ProcessEntry(childPid, process, command, process.realUid, process.realGid, process.currentDir,
-                                    process.env)
-        self.processes.add(childProcess)
+        childProcessEntry = ProcessEntry(childPid, pid, command, process.realUid, process.realGid, process.currentDir,
+                                         process.env)
+        self.processes.add(childProcessEntry)
 
-        system = SystemHandle(childPid, self)
+        system = SystemHandle(childPid, self.lock, self.userPipe)
         libc = Libc(system)
-        childProcess = child(system, libc, argv)
-
-        def run():
-            childProcess.run()
-            self.processes.remove(childPid)
-
-        thread = Thread(target=run, daemon=True)
-        thread.start()
-
-        return PID(childPid)
+        childProcess = OsProcess(child(system, libc, argv), childProcessEntry)
+        childProcess.run()
+        childProcessEntry.pythonPid = childProcess.process.pid
+        return childPid
 
     @strace
     def open(self, pid: PID, path: str, mode: FileMode) -> FD:
@@ -403,6 +437,17 @@ class Unix:
         pass
 
     @strace
+    def waitpid(self, pid: PID, childPid: PID) -> int:
+        childProcess = self.getProcess(childPid)
+        if childProcess.ppid != pid:
+            raise KernelError("Cannot wait on non-child", Errno.NOT_A_CHILD)
+
+        if childProcess.status == ProcessStatus.ZOMBIE:
+            self.processes.remove(childPid)
+            return childProcess.exitCode
+        return 27
+
+    @strace
     def getuid(self, pid: PID) -> UID:
         process = self.getProcess(pid)
         return process.realUid
@@ -515,6 +560,33 @@ class Unix:
     def symlink(self, pid: PID, target: str, alias: str) -> int:
         pass
 
+    @strace
+    def exit(self, pid: PID, exitCode: int) -> None:
+        process = self.getProcess(pid)
+        if process.status == ProcessStatus.ZOMBIE:
+            return
+
+        process.status = ProcessStatus.ZOMBIE
+        process.exitCode = exitCode
+
+        # clean up loose fds
+        for fd in process.fdTable:
+            ofd = self.openFileTable[fd.openFd.id]
+            ofd.refCount -= 1
+            if ofd.refCount == 0:
+                self.openFileTable.remove(ofd.id)
+
+        # send signal to parent
+        if process.ppid >= 0:
+            parentProcess = self.getProcess(process.ppid)
+            if parentProcess.pythonPid >= 0:
+                os.kill(parentProcess.pythonPid, signal.SIGCHLD)
+
+        # make sure actual process terminates
+        if process.pythonPid >= 0:
+            os.kill(process.pythonPid, signal.SIGTERM)
+            process.pythonPid = -1
+
     def mount(self, path: str, fs: Filesystem):
         if not path.startswith("/"):
             raise KernelError("Mount paths must be absolute", Errno.INVALID_ARG)
@@ -542,12 +614,16 @@ class Unix:
         # cast(DirectoryData, self.rootMount.data).addChild("dev", devDir)
         # devDir.references += 1
 
-        swapper = ProcessEntry(self.claimNextPid(), None, "swapper", self.rootUser.uid, self.rootUser.gid,
+        swapperPid = self.claimNextPid()
+        swapper = ProcessEntry(swapperPid, swapperPid, "swapper", self.rootUser.uid, self.rootUser.gid,
                                self.rootMount.iNumber, Environment())
-        swapper.parent = swapper
-
         self.processes.add(swapper)
 
-        shell = ProcessEntry(self.claimNextPid(), swapper.pid, "/usr/csh", UID(128), GID(128), self.rootMount.iNumber,
-                             Environment())
-        self.processes.add(shell)
+        # shell = ProcessEntry(self.claimNextPid(), swapper.pid, "/usr/csh", UID(128), GID(128), self.rootMount.iNumber,
+        #                      Environment())
+        # self.processes.add(shell)
+
+        sleep(1)
+
+        system = SystemHandle(PID(0), self.lock, self.userPipe)
+        system.fork(Sh, "sh", [])

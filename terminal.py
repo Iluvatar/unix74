@@ -1,14 +1,6 @@
-import sys
-from time import sleep
-from typing import Dict, Type
+from threading import Thread
 
-from libc import Libc
-from process.file_descriptor import PID
-from process.process import OsProcess
-from process.process_code import ProcessCode
-from unix import SystemHandle, Unix
-from usr.cat import Cat
-from usr.ls import Ls
+from unix import Unix
 
 variables = {
     "HOME": "/usr/aero",
@@ -17,54 +9,13 @@ variables = {
     "PS1": r"[\u@\h \W]\$ "
 }
 
-
-class Terminal(ProcessCode):
-    def run(self):
-        sys.stdin = open(0)
-        while True:
-            try:
-                line = input("$ ")
-            except KeyboardInterrupt:
-                self.libc.printf("\n")
-                continue
-            except EOFError:
-                self.libc.printf("\n")
-                break
-
-            if not line:
-                continue
-
-            tokens = line.split()
-            command = tokens[0]
-            args = tokens[1:]
-
-            commandDict: Dict[str, Type[ProcessCode]] = {
-                "ls": Ls,
-                "cat": Cat,
-            }
-
-            if command in commandDict:
-                p = OsProcess(commandDict[command](self.system, self.libc, args), [])
-                p.run()
-                sleep(1)
-            else:
-                self.libc.printf("Invalid command\n")
-
-
 if __name__ == "__main__":
     unix = Unix()
+
+    kernel = Thread(target=unix.start)
+    kernel.start()
+
     unix.startup()
-
-    system = SystemHandle(PID(1), unix.lock, unix.userPipe)
-    libc = Libc(system)
-
-    cat = OsProcess(Cat(system, libc, ["/usr/liz/note.txt"]), [])
-    ls = OsProcess(Ls(system, libc, ["/usr/liz/"]), [])
-
-    terminal = OsProcess(Terminal(system, libc, []), [])
-    terminal.run()
-
-    unix.start()
 
 # for p in unix.processes:
 #     print(p)
