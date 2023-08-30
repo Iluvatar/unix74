@@ -5,6 +5,7 @@ from collections.abc import Callable, MutableSet
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from multiprocessing import Process
+from multiprocessing.connection import Connection
 from signal import Signals, signal
 from types import FrameType
 from typing import List, Tuple
@@ -22,6 +23,7 @@ if typing.TYPE_CHECKING:
 
 class ProcessStatus(Enum):
     RUNNING = auto()
+    WAITING = auto()
     ZOMBIE = auto()
 
 
@@ -36,6 +38,7 @@ class ProcessEntry:
     env: Environment
     uid: UID | None = None
     gid: GID | None = None
+    pipe: Connection | None = None
     status: ProcessStatus = ProcessStatus.RUNNING
     exitCode: int = 0
     pythonPid: int = -1
@@ -63,7 +66,7 @@ class ProcessEntry:
 
     def __str__(self) -> str:
         fds = ",".join([str(fd) for fd in self.fdTable])
-        return f"['{self.command}', pid: {self.pid}, owner: {self.uid}, fd: [{fds}]]"
+        return f"['{self.command}', pid: {self.pid}, owner: {self.uid}, {self.status}, fd: [{fds}]]"
 
     def __repr__(self):
         return self.__str__()

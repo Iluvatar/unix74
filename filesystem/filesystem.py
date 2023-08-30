@@ -78,7 +78,7 @@ class FilePermissions:
                 self.high |= mode
             else:
                 self.high &= ~mode
-        if entity == FilePermissions.PermGroup.OWNER:
+        elif entity == FilePermissions.PermGroup.OWNER:
             if op == FilePermissions.Op.ADD:
                 self.owner |= mode
             else:
@@ -88,11 +88,13 @@ class FilePermissions:
                 self.group |= mode
             else:
                 self.group &= ~mode
-        else:
+        elif entity == FilePermissions.PermGroup.OTHER:
             if op == FilePermissions.Op.ADD:
                 self.other |= mode
             else:
                 self.other &= ~mode
+        else:
+            raise ValueError(f"Invalid permissions group {entity}")
 
     @staticmethod
     def parsePermissions(permissions: int) -> (SetId, Mode, Mode, Mode):

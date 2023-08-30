@@ -1,5 +1,4 @@
 import datetime
-from time import sleep
 from typing import Dict, List
 
 from filesystem.filesystem import FileType, Mode, SetId
@@ -19,8 +18,6 @@ class Ls(ProcessCode):
         inodeFlag: bool = False
         recursiveFlag: bool = False
         singleLineFlag: bool = False
-
-        sleep(1)
 
         while len(self.argv):
             arg = self.argv[0]

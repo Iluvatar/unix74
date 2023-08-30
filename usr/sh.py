@@ -11,6 +11,9 @@ class Sh(ProcessCode):
     def run(self):
         sys.stdin = open(0)
         while True:
+            # self.system.debug()
+            # self.system.printProcesses()
+
             try:
                 line = input("$ ")
             except KeyboardInterrupt:
