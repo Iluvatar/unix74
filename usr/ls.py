@@ -62,7 +62,7 @@ class Ls(ProcessCode):
             userDict: Dict[UID, str] = {}
             passwdFd = self.system.open("/etc/passwd", FileMode.READ)
             contents = self.libc.readAll(passwdFd)
-            # self.system.close(passwdFd)
+            self.system.close(passwdFd)
             lines = contents.split("\n")
             for line in lines:
                 parts = line.split(":")
@@ -80,7 +80,7 @@ class Ls(ProcessCode):
             groupDict: Dict[GID, str] = {}
             groupFd = self.system.open("/etc/group", FileMode.READ)
             contents = self.libc.readAll(groupFd)
-            # self.system.close(groupFd)
+            self.system.close(groupFd)
             lines = contents.split("\n")
             for line in lines:
                 parts = line.split(":")
@@ -132,7 +132,7 @@ class Ls(ProcessCode):
                 continue
 
             entries = self.system.getdents(fd)
-            # self.system.close(fd)
+            self.system.close(fd)
 
             fullString: str = ""
 

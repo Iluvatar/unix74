@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import select
 from datetime import datetime
-from enum import Enum, auto
 from multiprocessing import Pipe
 from multiprocessing.connection import Connection
 from time import sleep
@@ -12,6 +11,8 @@ from environment import Environment
 from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, Mode
 from filesystem.filesystem_loader import makeRoot
 from filesystem.filesystem_utils import DirEnt, INodeOperation, Stat
+from kernel.errors import Errno, KernelError
+from kernel.system_handle import SystemHandle
 from libc import Libc
 from process.file_descriptor import FD, FileMode, OFD, OpenFileDescriptor, PID, SeekFrom
 from process.process import OsProcess, ProcessEntry, ProcessFileDescriptor, ProcessStatus
@@ -22,74 +23,8 @@ from usr.sh import Sh
 
 T = TypeVar("T")
 
-
-class Errno(Enum):
-    NONE = 0
-    PERMISSION = auto()
-    NO_ACCESS = auto()
-    NO_SUCH_FILE = auto()
-    IS_A_DIR = auto()
-    NOT_A_DIR = auto()
-    INVALID_ARG = auto()
-    FUNC_NOT_IMPLEMENTED = auto()
-    BAD_PID = auto()
-    NOT_A_CHILD = auto()
-
-
-class KernelError(Exception):
-    def __init__(self, message: str, errno: Errno):
-        super(KernelError, self).__init__(message)
-        self.errno = errno
-
-
 UserId = NewType('UserId', int)
 GroupId = NewType('GroupId', int)
-
-
-class SystemHandle:
-    def __init__(self, pid: PID, pipe: Connection):
-        self.pid = pid
-        self.pipe = pipe
-
-    def __syscall(self, name: str, *args):
-        self.pipe.send((name, self.pid, *args))
-        ret = self.pipe.recv()
-        if ret[0] != Errno.NONE:
-            raise ValueError(f"{ret[0]}: {repr(ret[1])}")
-        return ret[1]
-
-    def debug(self) -> None:
-        return self.__syscall("debug")
-
-    def printProcess(self, pid: PID) -> None:
-        return self.__syscall("printProcess", pid)
-
-    def printProcesses(self) -> None:
-        return self.__syscall("printProcesses")
-
-    def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
-        return self.__syscall("fork", child, command, argv)
-
-    def open(self, path: str, mode: FileMode) -> FD:
-        return self.__syscall("open", path, mode)
-
-    def read(self, fd: FD, size: int) -> str:
-        return self.__syscall("read", fd, size)
-
-    def write(self, fd: FD, data: str) -> int:
-        return self.__syscall("write", fd, data)
-
-    def stat(self, path: str) -> Stat:
-        return self.__syscall("stat", path)
-
-    def getdents(self, fd: FD) -> List[DirEnt]:
-        return self.__syscall("getdents", fd)
-
-    def waitpid(self, pid: PID) -> Tuple[PID, int]:
-        return self.__syscall("waitpid", pid)
-
-    def exit(self, exitCode: int) -> None:
-        return self.__syscall("exit", exitCode)
 
 
 class Unix:
@@ -147,14 +82,17 @@ class Unix:
 
     def start(self):
         syscallDict = {
-            "debug": self.debug,
-            "printProcess": self.printProcess,
-            "printProcesses": self.printProcesses,
+            "debug__print": self.debug,
+            "debug__print_process": self.printProcess,
+            "debug__print_processes": self.printProcesses,
 
             "fork": self.fork,
             "open": self.open,
+            "lseek": self.lseek,
             "read": self.read,
             "write": self.write,
+            "close": self.close,
+            "chdir": self.chdir,
             "getdents": self.getdents,
             "stat": self.stat,
             "waitpid": self.waitpid,
@@ -282,7 +220,7 @@ class Unix:
             traversePath = parts[:-1]
         for part in traversePath:
             if currentNode.fileType != FileType.DIRECTORY:
-                raise KernelError(f"No such file ro directory: {path}", Errno.NO_SUCH_FILE)
+                raise KernelError(path, Errno.NO_SUCH_FILE)
             self.access(pid, currentNode, Mode.EXEC)
             if part == "":
                 part = "."
@@ -290,7 +228,7 @@ class Unix:
             try:
                 currentNode = fs.inodes[cast(DirectoryData, currentNode.data).children[part]]
             except KeyError:
-                raise KernelError(f"No such file ro directory: {path}", Errno.NO_SUCH_FILE)
+                raise KernelError(path, Errno.NO_SUCH_FILE)
 
         if op == INodeOperation.GET or op == INodeOperation.DELETE:
             return currentNode
@@ -328,9 +266,9 @@ class Unix:
                                          process.env, pipe=kernelPipe)
         self.processes.add(childProcessEntry)
 
-        system = SystemHandle(childPid, userPipe)
+        system = SystemHandle(childPid, userPipe, kernelPipe)
         libc = Libc(system)
-        childProcess = OsProcess(child(system, libc, argv), childProcessEntry)
+        childProcess = OsProcess(child(system, libc, argv))
         childProcess.run()
         childProcessEntry.pythonPid = childProcess.process.pid
 
@@ -342,7 +280,7 @@ class Unix:
         try:
             inode = self.getINodeFromPath(pid, path)
         except FileNotFoundError:
-            raise KernelError(f"No such file or directory: {path}", Errno.NO_SUCH_FILE)
+            raise KernelError(path, Errno.NO_SUCH_FILE)
 
         if FileMode.READ in mode:
             self.access(pid, inode, Mode.READ)
@@ -413,6 +351,8 @@ class Unix:
 
         process.fdTable.remove(fd)
 
+        return self.syscallReturnSuccess(pid, None)
+
     @strace
     def pipe(self, pid: PID) -> (FD, FD):
         pass
@@ -442,9 +382,11 @@ class Unix:
         process = self.getProcess(pid)
         inode = self.getINodeFromPath(pid, path)
         if inode.fileType != FileType.DIRECTORY:
-            raise NotADirectoryError()
+            raise KernelError(path, Errno.NO_SUCH_FILE)
         self.access(pid, inode, Mode.EXEC)
-        process.currentDir = inode
+        process.currentDir = inode.iNumber
+
+        return self.syscallReturnSuccess(pid, None)
 
     @strace
     def chmod(self, pid: PID, path: str, permissions: FilePermissions) -> int:
@@ -640,12 +582,10 @@ class Unix:
                                self.rootMount.iNumber, Environment())
         self.processes.add(swapper)
 
-        sleep(1)
-
         userPipe, kernelPipe = Pipe()
         swapper.pipe = kernelPipe
         self.pipes.append(kernelPipe)
-        system = SystemHandle(swapper.pid, userPipe)
+        system = SystemHandle(swapper.pid, userPipe, kernelPipe)
         system.fork(Sh, "sh", [])
         while True:
             sleep(1000)

@@ -5,7 +5,7 @@ from process.file_descriptor import FD, FileMode, SeekFrom
 from user import UID
 
 if typing.TYPE_CHECKING:
-    from unix import SystemHandle
+    from kernel.unix import SystemHandle
 
 
 class Libc:
@@ -25,8 +25,9 @@ class Libc:
 
     def readAll(self, fd: FD) -> str:
         text = ""
-        while len(data := self.system.read(fd, 1000)) > 0:
+        while len(data := self.system.read(fd, 1000)) == 1000:
             text += data
+        text += data
         return text
 
     def open(self, path: str, mode: FileMode = FileMode.READ) -> FD:
@@ -41,7 +42,7 @@ class Libc:
     def write(self, fd: FD, data: str) -> int:
         return self.system.write(fd, data)
 
-    def close(self, fd: FD) -> int:
+    def close(self, fd: FD) -> None:
         return self.system.close(fd)
 
     def crypt(self, plaintext) -> str:

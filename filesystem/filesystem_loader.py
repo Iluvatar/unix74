@@ -11,7 +11,7 @@ from filesystem.filesystem import DirectoryData, FilePermissions, FileType, File
 from user import GID, UID
 
 if typing.TYPE_CHECKING:
-    from unix import Unix
+    from kernel.unix import Unix
 
 origTime = datetime(1974, 10, 17, 10, 14, 27, 387)
 

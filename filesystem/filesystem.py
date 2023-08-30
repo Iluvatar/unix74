@@ -10,16 +10,7 @@ from self_keyed_dict import SelfKeyedDict
 from user import GID, UID
 
 if typing.TYPE_CHECKING:
-    from unix import Unix
-
-
-class INodeException(Exception):
-    pass
-
-
-class FilesystemError(Exception):
-    pass
-
+    from kernel.unix import Unix
 
 INumber = typing.NewType("INumber", int)
 
@@ -171,7 +162,7 @@ class DirectoryData(INodeData):
 
     def addChild(self, name: str, inumber: INumber):
         if name == "":
-            raise FilesystemError("File names cannot be empty")
+            raise ValueError("File names cannot be empty")
         self.children[name] = inumber
         self.__makeData()
 

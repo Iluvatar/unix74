@@ -1,3 +1,4 @@
+from kernel.errors import SyscallError
 from process.file_descriptor import FileMode
 from process.process_code import ProcessCode
 
@@ -22,7 +23,7 @@ class Cat(ProcessCode):
 
             try:
                 fd = self.system.open(file, FileMode.READ)
-            except ValueError:
+            except SyscallError:
                 self.libc.printf(f"{file}: No such file or directory\n")
                 continue
 

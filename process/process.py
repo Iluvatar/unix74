@@ -76,13 +76,11 @@ SignalHandler = Tuple[Signals, Callable[[int, FrameType], None]]
 
 
 class OsProcess:
-    def __init__(self, code: ProcessCode, processEntry: ProcessEntry,
-                 signalHandlers: List[SignalHandler] | None = None):
+    def __init__(self, code: ProcessCode, signalHandlers: List[SignalHandler] | None = None):
         self.signalHandlers: List[SignalHandler] = []
         if signalHandlers is not None:
             self.signalHandlers = signalHandlers
         self.code = code
-        self.processEntry = processEntry
         self.process: Process | None = None
 
     def run(self):
@@ -90,12 +88,17 @@ class OsProcess:
         self.process.start()
 
     def runInternal(self):
+        self.code.system.kernelPipe.close()
+
         for handler in self.signalHandlers:
             signal(handler[0], handler[1])
 
         try:
             self.code.run()
-        except Exception as e:
-            print("Got error:", e)
-        finally:
+        except Exception:
+            pass
+
+        try:
             self.code.system.exit(0)
+        except (EOFError, BrokenPipeError):
+            pass

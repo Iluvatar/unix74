@@ -1,10 +1,18 @@
 import sys
 from typing import Dict, Type
 
+from kernel.system_handle import SyscallError
 from process.process_code import ProcessCode
 from usr.cat import Cat
 from usr.echo import Echo
 from usr.ls import Ls
+
+variables = {
+    "HOME": "/usr/aero",
+    "PWD": "/usr/aero",
+    "PATH": "/usr/local/usr:/usr/usr",
+    "PS1": r"[\u@\h \W]\$ "
+}
 
 
 class Sh(ProcessCode):
@@ -12,7 +20,7 @@ class Sh(ProcessCode):
         sys.stdin = open(0)
         while True:
             # self.system.debug()
-            # self.system.printProcesses()
+            # self.system.debug__print_processes()
 
             try:
                 line = input("$ ")
@@ -36,7 +44,15 @@ class Sh(ProcessCode):
                 "echo": Echo,
             }
 
-            if command in commandDict:
+            if command == "cd":
+                path = "/"
+                if len(args) > 0:
+                    path = args[0]
+                try:
+                    self.system.chdir(path)
+                except SyscallError as e:
+                    self.libc.printf(f"{e}\n")
+            elif command in commandDict:
                 pid = self.system.fork(commandDict[command], command, args)
                 self.system.waitpid(pid)
             else:

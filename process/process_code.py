@@ -3,7 +3,7 @@ from typing import List
 
 if typing.TYPE_CHECKING:
     from libc import Libc
-    from unix import SystemHandle
+    from kernel.unix import SystemHandle
 
 
 class ProcessCode:
