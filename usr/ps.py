@@ -1,5 +1,6 @@
 from typing import List, Tuple
 
+from kernel.errors import SyscallError
 from process.file_descriptor import PID
 from process.process_code import ProcessCode
 from user import UID
@@ -23,12 +24,10 @@ class Ps(ProcessCode):
 
         try:
             fd = self.libc.open("/dev/mem")
-        except FileNotFoundError:
-            self.libc.printf("Could not open mem")
+        except SyscallError:
+            self.libc.printf("could not open /dev/mem\n")
             return 1
-        file: str = ""
-        while len(data := self.libc.read(fd, 100)) > 0:
-            file += data
+        file = self.libc.readAll(fd)
         self.libc.close(fd)
 
         ownUid = self.system.getuid()

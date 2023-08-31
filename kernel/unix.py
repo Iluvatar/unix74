@@ -257,16 +257,16 @@ class Unix:
     # System calls
 
     @strace
-    def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
+    def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str], env: Environment) -> PID:
         process = self.getProcess(pid)
         childPid = self.claimNextPid()
         userPipe, kernelPipe = Pipe()
         self.pipes.append(kernelPipe)
         childProcessEntry = ProcessEntry(childPid, pid, command, process.realUid, process.realGid, process.currentDir,
-                                         process.env, pipe=kernelPipe)
+                                         pipe=kernelPipe)
         self.processes.add(childProcessEntry)
 
-        system = SystemHandle(childPid, userPipe, kernelPipe)
+        system = SystemHandle(childPid, env.copy(), userPipe, kernelPipe)
         libc = Libc(system)
         childProcess = OsProcess(child(system, libc, argv))
         childProcess.run()
@@ -412,7 +412,7 @@ class Unix:
     @strace
     def getuid(self, pid: PID) -> UID:
         process = self.getProcess(pid)
-        return process.realUid
+        return self.syscallReturnSuccess(pid, process.realUid)
 
     @strace
     def geteuid(self, pid: PID) -> UID:
@@ -420,36 +420,36 @@ class Unix:
         return process.uid
 
     @strace
-    def setuid(self, pid: PID, uid: UID) -> int:
+    def setuid(self, pid: PID, uid: UID) -> None:
         process = self.getProcess(pid)
         if uid == process.uid or uid == process.realUid or self.isSuperUser(process.uid):
             process.uid = uid
             process.realUid = uid
-            return 0
-        return 1
+            return self.syscallReturnSuccess(pid, None)
+        raise KernelError("", Errno.PERMISSION)
 
     @strace
     def getgid(self, pid: PID) -> GID:
         process = self.getProcess(pid)
-        return process.realGid
+        return self.syscallReturnSuccess(pid, process.realGid)
 
     @strace
     def getegid(self, pid: PID) -> GID:
         process = self.getProcess(pid)
-        return process.gid
+        return self.syscallReturnSuccess(pid, process.gid)
 
     @strace
-    def setgid(self, pid: PID, gid: GID) -> int:
+    def setgid(self, pid: PID, gid: GID) -> None:
         process = self.getProcess(pid)
         if gid == process.gid or gid == process.realGid or self.isSuperUser(process.uid):
             process.gid = gid
             process.realGid = gid
-            return 0
-        return 1
+            return self.syscallReturnSuccess(pid, None)
+        raise KernelError("", Errno.PERMISSION)
 
     @strace
     def getpid(self, pid: PID) -> PID:
-        return pid
+        return self.syscallReturnSuccess(pid, pid)
 
     @strace
     def gettimeofday(self, pid: PID, time: int) -> int:
@@ -579,13 +579,13 @@ class Unix:
 
         swapperPid = self.claimNextPid()
         swapper = ProcessEntry(swapperPid, swapperPid, "swapper", self.rootUser.uid, self.rootUser.gid,
-                               self.rootMount.iNumber, Environment())
+                               self.rootMount.iNumber)
         self.processes.add(swapper)
 
         userPipe, kernelPipe = Pipe()
         swapper.pipe = kernelPipe
         self.pipes.append(kernelPipe)
-        system = SystemHandle(swapper.pid, userPipe, kernelPipe)
+        system = SystemHandle(swapper.pid, Environment(), userPipe, kernelPipe)
         system.fork(Sh, "sh", [])
         while True:
             sleep(1000)

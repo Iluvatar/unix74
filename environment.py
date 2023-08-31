@@ -15,5 +15,5 @@ class Environment:
     def setVar(self, name: str, val: str) -> None:
         self.variables[name] = val
 
-    def copy(self):
+    def copy(self) -> Environment:
         return Environment(self.variables.copy())

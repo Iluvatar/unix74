@@ -3,6 +3,7 @@ from typing import Dict, List
 
 from filesystem.filesystem import FileType, Mode, SetId
 from filesystem.filesystem_utils import Stat
+from kernel.errors import SyscallError
 from process.file_descriptor import FileMode
 from process.process_code import ProcessCode
 from user import GID, UID
@@ -127,7 +128,7 @@ class Ls(ProcessCode):
         for index, path in enumerate(sorted(paths)):
             try:
                 fd = self.system.open(path, FileMode.READ)
-            except FileNotFoundError:
+            except SyscallError:
                 notFoundFiles.append(f"{path} not found\n")
                 continue
 
@@ -203,5 +204,3 @@ class Ls(ProcessCode):
             if len(notFoundFiles) > 0 or index > 0:
                 self.libc.printf("\n")
             self.libc.printf(entry)
-
-        return 0

@@ -3,6 +3,7 @@ from enum import Enum, auto
 
 class Errno(Enum):
     NONE = 0
+    UNSPECIFIED = auto()
     PERMISSION = auto()
     NO_ACCESS = auto()
     NO_SUCH_FILE = auto()

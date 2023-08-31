@@ -1,29 +1,87 @@
 import sys
-from typing import Dict, Type
+from typing import Dict, List, Tuple, Type
 
 from kernel.system_handle import SyscallError
 from process.process_code import ProcessCode
 from usr.cat import Cat
 from usr.echo import Echo
 from usr.ls import Ls
+from usr.ps import Ps
 
 variables = {
-    "HOME": "/usr/aero",
-    "PWD": "/usr/aero",
-    "PATH": "/usr/local/usr:/usr/usr",
+    "HOME": "/usr/liz",
+    "PATH": "/etc:/bin:/usr:.",
     "PS1": r"[\u@\h \W]\$ "
 }
+
+
+def tokenize(string: str) -> List[str]:
+    return string.split()
 
 
 class Sh(ProcessCode):
     def run(self):
         sys.stdin = open(0)
+
+        lastCommand: str = ""
+
+        def processLine(line: str) -> Tuple[bool, str]:
+            tokens: List[str] = tokenize(line)
+
+            needReprint: bool = False
+            processedTokens: List[str] = []
+            for token in tokens:
+                if token[0] == "$":
+                    processedTokens.append(self.libc.getenv(token[1:]))
+                elif token == "!!":
+                    processedTokens.append(lastCommand)
+                    needReprint = True
+                else:
+                    processedTokens.append(token)
+            return needReprint, " ".join(processedTokens)
+
+        def makePs1(formatString: str):
+            def escape(c: str):
+                if c == "\\" or c == "$":
+                    return c
+                elif c == "u":
+                    return "liz"
+                elif c == "h":
+                    return "pokey"
+                elif c == "W":
+                    return "/"
+                else:
+                    return c
+
+            formattedString = ""
+            i = 0
+            while i < len(formatString):
+                char = formatString[i]
+                if char == "\\":
+                    if i < len(formatString) - 1:
+                        formattedString += escape(formatString[i + 1])
+                    else:
+                        formattedString += "\\"
+                    i += 1
+                else:
+                    formattedString += char
+                i += 1
+
+            return formattedString
+
+        # self.libc.setenv("PWD", self.libc.pwd())
+
+        for var in variables:
+            self.libc.setenv(var, variables[var])
+
         while True:
             # self.system.debug()
             # self.system.debug__print_processes()
 
             try:
-                line = input("$ ")
+                ps1Format = self.libc.getenv("PS1") or "$ "
+                ps1 = makePs1(ps1Format)
+                line = input(ps1)
             except KeyboardInterrupt:
                 self.libc.printf("\n")
                 continue
@@ -31,17 +89,25 @@ class Sh(ProcessCode):
                 self.libc.printf("\n")
                 break
 
-            if not line:
+            reprint, processedLine = processLine(line)
+
+            if not processedLine:
                 continue
 
-            tokens = line.split()
+            tokens = tokenize(processedLine)
             command = tokens[0]
             args = tokens[1:]
 
+            if reprint:
+                self.libc.printf(processedLine + "\n")
+
+            lastCommand = processedLine
+
             commandDict: Dict[str, Type[ProcessCode]] = {
-                "ls": Ls,
                 "cat": Cat,
                 "echo": Echo,
+                "ls": Ls,
+                "ps": Ps,
             }
 
             if command == "cd":
@@ -50,6 +116,7 @@ class Sh(ProcessCode):
                     path = args[0]
                 try:
                     self.system.chdir(path)
+                    self.libc.setenv("OLDPWD", self.libc.getenv("PWD"))
                 except SyscallError as e:
                     self.libc.printf(f"{e}\n")
             elif command in commandDict:

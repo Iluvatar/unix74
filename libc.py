@@ -48,6 +48,12 @@ class Libc:
     def crypt(self, plaintext) -> str:
         return md5(plaintext.encode("utf-8")).hexdigest()[:16]
 
+    def getenv(self, var: str) -> str:
+        return self.system.env.getVar(var)
+
+    def setenv(self, var: str, value: str) -> None:
+        return self.system.env.setVar(var, value)
+
     def getPw(self, uid: UID) -> str:
         fd = self.open("/etc/passwd", FileMode.READ)
         file = ""

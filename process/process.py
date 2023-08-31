@@ -10,8 +10,8 @@ from signal import Signals, signal
 from types import FrameType
 from typing import List, Tuple
 
-from environment import Environment
 from filesystem.filesystem import INumber
+from kernel.errors import Errno
 from process.file_descriptor import FD, PID, ProcessFileDescriptor
 from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
@@ -35,7 +35,6 @@ class ProcessEntry:
     realUid: UID
     realGid: GID
     currentDir: INumber
-    env: Environment
     uid: UID | None = None
     gid: GID | None = None
     pipe: Connection | None = None
@@ -93,12 +92,13 @@ class OsProcess:
         for handler in self.signalHandlers:
             signal(handler[0], handler[1])
 
+        exitCode = Errno.UNSPECIFIED
         try:
-            self.code.run()
-        except Exception:
-            pass
+            exitCode = self.code.run()
+        except Exception as e:
+            print("exception", e)
 
         try:
-            self.code.system.exit(0)
+            self.code.system.exit(exitCode)
         except (EOFError, BrokenPipeError):
             pass

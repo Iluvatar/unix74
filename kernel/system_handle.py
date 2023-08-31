@@ -1,15 +1,18 @@
 from multiprocessing.connection import Connection
 from typing import List, Tuple, Type
 
+from environment import Environment
 from filesystem.filesystem_utils import DirEnt, Stat
 from kernel.errors import Errno, SyscallError
 from process.file_descriptor import FD, FileMode, PID, SeekFrom
 from process.process_code import ProcessCode
+from user import GID, UID
 
 
 class SystemHandle:
-    def __init__(self, pid: PID, userPipe: Connection, kernelPipe: Connection):
+    def __init__(self, pid: PID, env: Environment, userPipe: Connection, kernelPipe: Connection):
         self.pid = pid
+        self.env = env
         self.userPipe = userPipe
         self.kernelPipe = kernelPipe
 
@@ -30,7 +33,7 @@ class SystemHandle:
         return self.__syscall("debug__print_processes")
 
     def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
-        return self.__syscall("fork", child, command, argv)
+        return self.__syscall("fork", child, command, argv, self.env)
 
     def open(self, path: str, mode: FileMode) -> FD:
         return self.__syscall("open", path, mode)
@@ -58,6 +61,27 @@ class SystemHandle:
 
     def waitpid(self, pid: PID) -> Tuple[PID, int]:
         return self.__syscall("waitpid", pid)
+
+    def getuid(self) -> UID:
+        return self.__syscall("getuid")
+
+    def geteuid(self) -> UID:
+        return self.__syscall("geteuid")
+
+    def setuid(self, uid: UID) -> None:
+        return self.__syscall("setuid", uid)
+
+    def getgid(self) -> GID:
+        return self.__syscall("getgid")
+
+    def getegid(self) -> GID:
+        return self.__syscall("getegid")
+
+    def setgid(self, gid: GID) -> None:
+        return self.__syscall("setgid", gid)
+
+    def getpid(self) -> PID:
+        return self.__syscall("getpid")
 
     def exit(self, exitCode: int) -> None:
         return self.__syscall("exit", exitCode)
