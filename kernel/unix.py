@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import select
+from collections.abc import Callable
 from datetime import datetime
 from multiprocessing import Pipe
 from multiprocessing.connection import Connection
 from time import sleep
 from typing import Any, Dict, List, NewType, Tuple, Type, TypeVar, cast
+from uuid import UUID
 
 from environment import Environment
-from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, Mode
-from filesystem.filesystem_loader import makeRoot
-from filesystem.filesystem_utils import DirEnt, INodeOperation, Stat
+from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, INumber, Mode
+from filesystem.filesystem_loader import makeDev, makeRoot
+from filesystem.filesystem_utils import Dentry, INodeOperation, Mount, Stat
 from kernel.errors import Errno, KernelError
 from kernel.system_handle import SystemHandle
 from libc import Libc
@@ -29,8 +31,9 @@ GroupId = NewType('GroupId', int)
 
 class Unix:
     def __init__(self):
-        self.mounts: Dict[str, Filesystem] = {}
-        self.rootMount: INode | None = None
+        self.mounts: List[Mount] = []
+        self.filesystems: SelfKeyedDict[Filesystem, UUID] = SelfKeyedDict("uuid")
+        self.rootNode: Filesystem | None = None
         self.rootUser: User = User(UserName("root"), Password(""), UID(0), GID(0), "root", "/", "/usr/sh")
         self.processes: SelfKeyedDict[ProcessEntry, PID] = SelfKeyedDict("pid")
         self.openFileTable: SelfKeyedDict[OpenFileDescriptor, OFD] = SelfKeyedDict("id")
@@ -45,8 +48,8 @@ class Unix:
 
         out += f"mounts ({len(self.mounts)}):\n"
         for mount in self.mounts:
-            out += f"    {mount}: {len(self.mounts[mount])}\n"
-        out += f"root mount is {self.rootMount.iNumber}\n\n"
+            out += f"    {mount}\n"
+        out += f"root mount is {self.rootNode.rootINum}\n\n"
 
         out += f"processes ({len(self.processes)}):\n"
         for process in self.processes:
@@ -60,7 +63,8 @@ class Unix:
         return out
 
     def sendSyscallReturn(self, pipe: Connection, errno: Errno, value) -> None:
-        pipe.send((errno, value))
+        if pipe:
+            pipe.send((errno, value))
 
     def syscallReturnSuccess(self, pid: PID, value: T) -> T:
         process = self.getProcess(pid)
@@ -80,11 +84,17 @@ class Unix:
             print(process)
         self.syscallReturnSuccess(pid, None)
 
+    def printFilesystems(self, pid: PID):
+        for mount in self.mounts:
+            print(mount)
+        self.syscallReturnSuccess(pid, None)
+
     def start(self):
-        syscallDict = {
+        syscallDict: Dict[str, Callable[PID, ...]] = {
             "debug__print": self.debug,
             "debug__print_process": self.printProcess,
             "debug__print_processes": self.printProcesses,
+            "debug__print_filesystems": self.printFilesystems,
 
             "fork": self.fork,
             "open": self.open,
@@ -100,7 +110,7 @@ class Unix:
         }
 
         while True:
-            ready, _, _ = select.select(self.pipes, [], [], 1)
+            ready, _, _ = select.select(self.pipes, [], [], .05)
             for pipe in ready:
                 try:
                     data: Tuple[str, PID, ...] = pipe.recv()
@@ -118,7 +128,9 @@ class Unix:
                 except TypeError as e:
                     self.sendSyscallReturn(pipe, Errno.INVALID_ARG, repr(e))
                 except KernelError as e:
-                    self.sendSyscallReturn(pipe, e.errno, str(e))
+                    self.sendSyscallReturn(pipe, e.errno, repr(e))
+                except Exception as e:
+                    self.sendSyscallReturn(pipe, Errno.PANIC, repr(e))
 
     @staticmethod
     def strace(func):
@@ -190,8 +202,7 @@ class Unix:
         def checkModeSubset(m: Mode, inodeMode: Mode):
             if m not in inodeMode:
                 raise KernelError(f"Mode requested {m}, actual is {inodeMode}", Errno.NO_ACCESS)
-            else:
-                return True
+            return True
 
         process = self.getProcess(pid)
         if self.isSuperUser(process.uid):
@@ -205,14 +216,26 @@ class Unix:
             return checkModeSubset(mode, inode.permissions.group)
         return checkModeSubset(mode, inode.permissions.other)
 
+    def iget(self, filesystemId: UUID, iNumber: INumber) -> INode:
+        fs = self.filesystems[filesystemId]
+        inode = fs.inodes[iNumber]
+        if inode.isMount:
+            for mount in self.mounts:
+                if inode.filesystemId == mount.mountedOnFsId and inode.iNumber == mount.mountedOnINumber:
+                    inode = self.filesystems[mount.mountedFsId].root()
+                    break
+            else:
+                raise KernelError(f"Unknown filesystem {filesystemId}", Errno.NO_SUCH_FILE)
+        return inode
+
     def traversePath(self, pid: PID, path: str, op: INodeOperation) -> INode:
-        if not (fs := self.mounts["/"]):
+        if not self.rootNode:
             raise KernelError("No root mount found", Errno.NO_SUCH_FILE)
 
         process = self.getProcess(pid)
-        currentNode: INode = fs.inodes[process.currentDir]
+        currentNode: INode = process.currentDir
         if path.startswith("/"):
-            currentNode = fs.root()
+            currentNode = self.rootNode.root()
 
         parts = path.rstrip("/").split("/")
         traversePath = parts
@@ -226,21 +249,25 @@ class Unix:
                 part = "."
 
             try:
-                currentNode = fs.inodes[cast(DirectoryData, currentNode.data).children[part]]
+                childINumber = cast(DirectoryData, currentNode.data).children[part]
+                currentNode = self.iget(currentNode.filesystemId, childINumber)
             except KeyError:
-                raise KernelError(path, Errno.NO_SUCH_FILE)
+                raise KernelError(path, Errno.NO_SUCH_FILE) from None
 
         if op == INodeOperation.GET or op == INodeOperation.DELETE:
             return currentNode
         elif op == INodeOperation.CREATE:
+            name = parts[-1]
+            fs = self.filesystems[currentNode.filesystemId]
+
             try:
-                return fs.inodes[cast(DirectoryData, currentNode.data).children[parts[-1]]]
+                return fs.inodes[cast(DirectoryData, currentNode.data).children[name]]
             except KeyError:
                 pass
 
             self.access(pid, currentNode, Mode.WRITE)
             child = INode(fs.claimNextINumber(), currentNode.permissions, FileType.NONE, process.uid, process.gid,
-                          datetime.now(), datetime.now(), INodeData())
+                          datetime.now(), datetime.now(), INodeData(), fs.uuid)
             cast(DirectoryData, currentNode.data).addChild(parts[-1], child.iNumber)
         else:
             raise KernelError(f"Invalid op: {op}", Errno.FUNC_NOT_IMPLEMENTED)
@@ -365,15 +392,15 @@ class Unix:
         return self.syscallReturnSuccess(pid, stat)
 
     @strace
-    def getdents(self, pid: PID, fd: FD) -> List[DirEnt]:
+    def getdents(self, pid: PID, fd: FD) -> List[Dentry]:
         process = self.getProcess(pid)
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
         if ofdEntry.file.fileType != FileType.DIRECTORY:
             raise KernelError("", Errno.NOT_A_DIR)
-        out: List[DirEnt] = []
+        out: List[Dentry] = []
         for name, child in cast(DirectoryData, ofdEntry.file.data).children.items():
-            out.append(DirEnt(name, child))
+            out.append(Dentry(name, child, ofdEntry.file.filesystemId))
 
         return self.syscallReturnSuccess(pid, out)
 
@@ -384,7 +411,7 @@ class Unix:
         if inode.fileType != FileType.DIRECTORY:
             raise KernelError(path, Errno.NO_SUCH_FILE)
         self.access(pid, inode, Mode.EXEC)
-        process.currentDir = inode.iNumber
+        process.currentDir = inode
 
         return self.syscallReturnSuccess(pid, None)
 
@@ -454,6 +481,29 @@ class Unix:
     @strace
     def gettimeofday(self, pid: PID, time: int) -> int:
         pass
+
+    @strace
+    def mount(self, pid: PID, path: str, fs: Filesystem) -> None:
+        process = self.getProcess(pid)
+        if not self.isSuperUser(process.uid):
+            raise KernelError("Only superuser can mount", Errno.PERMISSION)
+        inode = self.getINodeFromPath(pid, path)
+        self.mounts.append(Mount(fs.uuid, inode.filesystemId, inode.iNumber))
+        inode.isMount = True
+        self.filesystems.add(fs)
+        return self.syscallReturnSuccess(pid, None)
+
+    @strace
+    def umount(self, pid: PID, path: str) -> None:
+        process = self.getProcess(pid)
+        if not self.isSuperUser(process.uid):
+            raise KernelError("Only superuser can unmount", Errno.PERMISSION)
+        try:
+            self.mounts.remove(Mount())
+            del self.mounts[path]
+            return self.syscallReturnSuccess(pid, None)
+        except KeyError:
+            raise KernelError(f"{path} not currently mounted", Errno.INVALID_ARG)
 
     @strace
     def link(self, pid: PID, target: str, alias: str) -> None:
@@ -550,11 +600,6 @@ class Unix:
             process.pipe.close()
             self.pipes.remove(process.pipe)
 
-    def mount(self, path: str, fs: Filesystem):
-        if not path.startswith("/"):
-            raise KernelError("Mount paths must be absolute", Errno.INVALID_ARG)
-        self.mounts[path] = fs
-
     def startup(self):
         # self.mount("/", makeRoot())
         # self.mount("/dev", makeDev())
@@ -569,18 +614,17 @@ class Unix:
         # init = swapper.makeChild(1, "init")
 
         rootFs = makeRoot()
-        self.mount("/", rootFs)
-        self.rootMount = rootFs.root()
-        # devFs = makeDev(self)
-        # cast(DirectoryData, devFs.root()).addChild("..", self.rootMount)
-        # self.rootMount.references += 1
-        # cast(DirectoryData, self.rootMount.data).addChild("dev", devDir)
-        # devDir.references += 1
+        self.mounts.append(Mount(rootFs.uuid, UUID(int=0), INumber(0)))
+        self.rootNode = rootFs
+        self.filesystems.add(rootFs)
 
         swapperPid = self.claimNextPid()
         swapper = ProcessEntry(swapperPid, swapperPid, "swapper", self.rootUser.uid, self.rootUser.gid,
-                               self.rootMount.iNumber)
+                               self.rootNode.root())
         self.processes.add(swapper)
+
+        devFs = makeDev(self)
+        self.mount(PID(0), "/dev", devFs)
 
         userPipe, kernelPipe = Pipe()
         swapper.pipe = kernelPipe

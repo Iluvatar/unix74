@@ -75,7 +75,7 @@ class Sh(ProcessCode):
             self.libc.setenv(var, variables[var])
 
         while True:
-            # self.system.debug()
+            # self.system.debug__print()
             # self.system.debug__print_processes()
 
             try:

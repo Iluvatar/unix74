@@ -1,15 +1,31 @@
 import datetime
 from dataclasses import dataclass
 from enum import Enum, auto
+from uuid import UUID
 
 from filesystem.filesystem import FilePermissions, FileType, INumber
 from user import GID, UID
 
 
 @dataclass
-class DirEnt:
+class Mount:
+    mountedFsId: UUID
+    mountedOnFsId: UUID
+    mountedOnINumber: INumber
+
+    @staticmethod
+    def __short(uuid: UUID):
+        return str(uuid)[:4]
+
+    def __str__(self):
+        return f"{self.__short(self.mountedOnFsId)}.{self.mountedOnINumber} -> {self.__short(self.mountedFsId)}"
+
+
+@dataclass
+class Dentry:
     name: str
-    iNumber: INumber  # parent: 'DirEnt'  # children: List['DirEnt']
+    iNumber: INumber
+    filesystemId: UUID
 
 
 @dataclass

@@ -25,9 +25,8 @@ class Libc:
 
     def readAll(self, fd: FD) -> str:
         text = ""
-        while len(data := self.system.read(fd, 1000)) == 1000:
+        while len(data := self.system.read(fd, 1000)) > 0:
             text += data
-        text += data
         return text
 
     def open(self, path: str, mode: FileMode = FileMode.READ) -> FD:

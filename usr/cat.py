@@ -27,7 +27,12 @@ class Cat(ProcessCode):
                 self.libc.printf(f"{file}: No such file or directory\n")
                 continue
 
-            data = self.libc.readAll(fd)
+            totalSize = 0
+            while len(data := self.libc.read(fd, 1000)) > 0:
+                self.libc.printf(data)
+                totalSize += len(data)
+            if totalSize > 0 and not data.endswith("\n"):
+                data += "\n"
             self.libc.printf(data)
 
         return 0

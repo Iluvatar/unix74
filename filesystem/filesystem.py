@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import datetime
+import math
 import typing
 from dataclasses import dataclass
 from enum import Enum, IntFlag, auto
 from typing import Dict
+from uuid import UUID
 
 from self_keyed_dict import SelfKeyedDict
 from user import GID, UID
@@ -114,14 +116,13 @@ class INode:
     timeCreated: datetime.datetime
     timeModified: datetime.datetime
     data: INodeData
+    filesystemId: UUID
+    isMount: bool = False
     deviceNumber: int = -1
     references: int = 1
 
     def __str__(self):
         return f"[INode {self.permissions}, {self.fileType}, {self.owner}:{self.group}]"
-
-    def __repr__(self):
-        return self.__str__()
 
 
 class INodeData:
@@ -205,10 +206,12 @@ class SpecialFileData(INodeData):
 
 
 class Filesystem:
-    def __init__(self):
+    def __init__(self, uuid: UUID):
+        self.uuid = uuid
         self.inodes: SelfKeyedDict[INode, INumber] = SelfKeyedDict("iNumber")
         self.rootINum: INumber | None = None
         self.nextINumber: INumber = INumber(1)
+        self.blockSize: int = 512
 
     def claimNextINumber(self) -> INumber:
         iNumber = self.nextINumber
@@ -226,5 +229,14 @@ class Filesystem:
         self.inodes.add(inode)
         return inode
 
+    def size(self):
+        return sum([math.ceil(i.data.size() / self.blockSize) * self.blockSize for i in self.inodes])
+
     def __len__(self):
-        return len(self.inodes)
+        return self.size()
+
+    def __str__(self):
+        return f"[{self.uuid} {len(self)} bytes]"
+
+    def __repr__(self):
+        return self.__str__()

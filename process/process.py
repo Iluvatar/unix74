@@ -10,7 +10,7 @@ from signal import Signals, signal
 from types import FrameType
 from typing import List, Tuple
 
-from filesystem.filesystem import INumber
+from filesystem.filesystem import INode
 from kernel.errors import Errno
 from process.file_descriptor import FD, PID, ProcessFileDescriptor
 from process.process_code import ProcessCode
@@ -34,7 +34,7 @@ class ProcessEntry:
     command: str
     realUid: UID
     realGid: GID
-    currentDir: INumber
+    currentDir: INode
     uid: UID | None = None
     gid: GID | None = None
     pipe: Connection | None = None

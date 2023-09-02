@@ -2,7 +2,7 @@ from multiprocessing.connection import Connection
 from typing import List, Tuple, Type
 
 from environment import Environment
-from filesystem.filesystem_utils import DirEnt, Stat
+from filesystem.filesystem_utils import Dentry, Stat
 from kernel.errors import Errno, SyscallError
 from process.file_descriptor import FD, FileMode, PID, SeekFrom
 from process.process_code import ProcessCode
@@ -32,6 +32,9 @@ class SystemHandle:
     def debug__print_processes(self) -> None:
         return self.__syscall("debug__print_processes")
 
+    def debug__print_filesystems(self) -> None:
+        return self.__syscall("debug__print_filesystems")
+
     def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
         return self.__syscall("fork", child, command, argv, self.env)
 
@@ -56,7 +59,7 @@ class SystemHandle:
     def stat(self, path: str) -> Stat:
         return self.__syscall("stat", path)
 
-    def getdents(self, fd: FD) -> List[DirEnt]:
+    def getdents(self, fd: FD) -> List[Dentry]:
         return self.__syscall("getdents", fd)
 
     def waitpid(self, pid: PID) -> Tuple[PID, int]:

@@ -4,6 +4,7 @@ import typing
 from collections import defaultdict
 from datetime import datetime
 from typing import DefaultDict
+from uuid import uuid4
 
 from filesystem.dev_files import DevConsole, DevNull, Mem
 from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, INumber, Mode, \
@@ -49,7 +50,8 @@ def makeChild(fs: Filesystem, parentINum: INumber, name: str, filetype: FileType
     if timeModified is None:
         timeModified = timeCreated
 
-    child = fs.add(INode(fs.claimNextINumber(), permissions, filetype, owner, group, timeCreated, timeModified, data))
+    child = fs.add(
+        INode(fs.claimNextINumber(), permissions, filetype, owner, group, timeCreated, timeModified, data, fs.uuid))
     typing.cast(DirectoryData, parent.data).addChild(name, child.iNumber)
     return child.iNumber
 
@@ -126,11 +128,11 @@ def makeMurtaughHome(fs: Filesystem, usrDirINum: INumber) -> None:
 
 
 def makeRoot() -> Filesystem:
-    fs = Filesystem()
+    fs = Filesystem(uuid4())
 
     root = fs.add(
         INode(fs.claimNextINumber(), FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"],
-              origTime, origTime, DirectoryData()))
+              origTime, origTime, DirectoryData(), fs.uuid))
     typing.cast(DirectoryData, root.data).addChildren({
         ".": root.iNumber,
         "..": root.iNumber,
@@ -138,9 +140,10 @@ def makeRoot() -> Filesystem:
     root.references = 2
 
     binDir = makeChildDir(fs, root.iNumber, "bin")
+    devDir = makeChildDir(fs, root.iNumber, "dev")
     etcDir = typing.cast(DirectoryData, root.data).addChild("etc", makeEtc(fs, root.iNumber))
-    usrDir = makeChildDir(fs, root.iNumber, "usr")
     tmpDir = makeChildDir(fs, root.iNumber, "tmp", permissions=FilePermissions(0o1777))
+    usrDir = makeChildDir(fs, root.iNumber, "usr")
     varDir = makeChildDir(fs, root.iNumber, "var")
 
     makeLizHome(fs, usrDir)
@@ -150,11 +153,11 @@ def makeRoot() -> Filesystem:
 
 
 def makeDev(unix: Unix) -> Filesystem:
-    fs = Filesystem()
+    fs = Filesystem(uuid4())
 
     devDir = fs.add(
         INode(fs.claimNextINumber(), FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"],
-              origTime, origTime, DirectoryData()))
+              origTime, origTime, DirectoryData(), fs.uuid))
     typing.cast(DirectoryData, devDir.data).addChild(".", devDir.iNumber)
 
     makeChildFile(fs, devDir.iNumber, "null", DevNull(unix), filetype=FileType.CHARACTER,
