@@ -106,6 +106,13 @@ class Unix:
             "getdents": self.getdents,
             "stat": self.stat,
             "waitpid": self.waitpid,
+            "getuid": self.getuid,
+            "geteuid": self.geteuid,
+            "setuid": self.setuid,
+            "getgid": self.getgid,
+            "getegid": self.getegid,
+            "setgid": self.setgid,
+            "getpid": self.getpid,
             "exit": self.exit,
             "umount": self.umount,
         }
@@ -399,7 +406,7 @@ class Unix:
     def stat(self, pid: PID, path: str) -> Stat:
         inode = self.getINodeFromPath(pid, path)
         stat = Stat(inode.iNumber, inode.permissions, inode.fileType, inode.owner, inode.group, inode.data.size(),
-                    inode.timeCreated, inode.timeModified, inode.deviceNumber, inode.references)
+                    inode.timeCreated, inode.timeModified, inode.filesystemId, inode.deviceNumber, inode.references)
         return self.syscallReturnSuccess(pid, stat)
 
     @strace
@@ -614,18 +621,6 @@ class Unix:
             self.pipes.remove(process.pipe)
 
     def startup(self):
-        # self.mount("/", makeRoot())
-        # self.mount("/dev", makeDev())
-
-        # try:
-        #     etcPasswd = filesystem.getINodeFromRelativePath("/etc/passwd")
-        # except INodeException:
-        #     raise KernelError("Cannot find passwd file") from None
-
-        # swapper = Process(0, None, "swapper", self.rootUser.uid, Environment())
-        # swapper.parent = swapper
-        # init = swapper.makeChild(1, "init")
-
         rootFs = makeRoot()
         self.mounts.append(Mount(rootFs.uuid, UUID(int=0), INumber(0)))
         self.rootNode = rootFs

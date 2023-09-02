@@ -7,6 +7,7 @@ from usr.cat import Cat
 from usr.echo import Echo
 from usr.ls import Ls
 from usr.ps import Ps
+from usr.pwd import Pwd
 
 variables = {
     "HOME": "/usr/liz",
@@ -107,6 +108,7 @@ class Sh(ProcessCode):
                 "cat": Cat,
                 "echo": Echo,
                 "ls": Ls,
+                "pwd": Pwd,
                 "ps": Ps,
             }
 

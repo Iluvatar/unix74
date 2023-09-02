@@ -38,6 +38,7 @@ class Stat:
     size: int
     timeCreated: datetime.datetime
     timeModified: datetime.datetime
+    filesystemId: UUID
     deviceNumber: int = -1
     references: int = 1
 
