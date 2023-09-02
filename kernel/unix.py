@@ -248,6 +248,16 @@ class Unix:
             if part == "":
                 part = "."
 
+            fs = self.filesystems[currentNode.filesystemId]
+
+            if fs.root().iNumber == currentNode.iNumber and part == "..":
+                if self.rootNode.root() == currentNode:
+                    continue
+                covered: INode = self.filesystems[currentNode.filesystemId].covered
+                if not covered:
+                    raise KernelError(path, Errno.NO_SUCH_FILE)
+                currentNode = covered
+
             try:
                 childINumber = cast(DirectoryData, currentNode.data).children[part]
                 currentNode = self.iget(currentNode.filesystemId, childINumber)
@@ -490,6 +500,7 @@ class Unix:
         inode = self.getINodeFromPath(pid, path)
         self.mounts.append(Mount(fs.uuid, inode.filesystemId, inode.iNumber))
         inode.isMount = True
+        fs.covered = inode
         self.filesystems.add(fs)
         return self.syscallReturnSuccess(pid, None)
 

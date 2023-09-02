@@ -122,7 +122,7 @@ class INode:
     references: int = 1
 
     def __str__(self):
-        return f"[INode {self.permissions}, {self.fileType}, {self.owner}:{self.group}]"
+        return f"[INode {str(self.filesystemId)[:4]}.{self.iNumber} {self.permissions}, {self.fileType}, {self.owner}:{self.group}]"
 
 
 class INodeData:
@@ -206,8 +206,9 @@ class SpecialFileData(INodeData):
 
 
 class Filesystem:
-    def __init__(self, uuid: UUID):
+    def __init__(self, uuid: UUID, covered: INode | None = None):
         self.uuid = uuid
+        self.covered = covered
         self.inodes: SelfKeyedDict[INode, INumber] = SelfKeyedDict("iNumber")
         self.rootINum: INumber | None = None
         self.nextINumber: INumber = INumber(1)
