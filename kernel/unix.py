@@ -107,6 +107,7 @@ class Unix:
             "stat": self.stat,
             "waitpid": self.waitpid,
             "exit": self.exit,
+            "umount": self.umount,
         }
 
         while True:
@@ -509,12 +510,13 @@ class Unix:
         process = self.getProcess(pid)
         if not self.isSuperUser(process.uid):
             raise KernelError("Only superuser can unmount", Errno.PERMISSION)
-        try:
-            self.mounts.remove(Mount())
-            del self.mounts[path]
-            return self.syscallReturnSuccess(pid, None)
-        except KeyError:
+        inode = self.getINodeFromPath(pid, path)
+        fs = self.filesystems[inode.filesystemId]
+        if inode != fs.root():
             raise KernelError(f"{path} not currently mounted", Errno.INVALID_ARG)
+        fs.covered.isMount = False
+        self.mounts.remove(Mount(fs.uuid, fs.covered.filesystemId, fs.covered.iNumber))
+        return self.syscallReturnSuccess(pid, None)
 
     @strace
     def link(self, pid: PID, target: str, alias: str) -> None:

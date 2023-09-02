@@ -88,3 +88,6 @@ class SystemHandle:
 
     def exit(self, exitCode: int) -> None:
         return self.__syscall("exit", exitCode)
+
+    def umount(self, path: str) -> None:
+        return self.__syscall("umount", path)
