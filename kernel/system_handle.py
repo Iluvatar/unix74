@@ -19,9 +19,9 @@ class SystemHandle:
     def __syscall(self, name: str, *args):
         self.userPipe.send((name, self.pid, *args))
         ret = self.userPipe.recv()
-        if ret[0] != Errno.NONE:
-            raise SyscallError(f"{ret[0]}: {repr(ret[1])}")
-        return ret[1]
+        if ret[1] != Errno.NONE:
+            raise SyscallError(ret[0], ret[1])
+        return ret[0]
 
     def debug__print(self) -> None:
         return self.__syscall("debug__print")

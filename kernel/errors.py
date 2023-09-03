@@ -26,5 +26,5 @@ class KernelError(Exception):
         return f"{str(self.errno)}: {self.args[0]}"
 
 
-class SyscallError(Exception):
+class SyscallError(KernelError):
     pass

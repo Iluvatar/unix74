@@ -118,7 +118,7 @@ def makeMurtaughHome(fs: Filesystem, usrDirINum: INumber) -> None:
     makeChildFile(fs, murtaughHomeDirINum, "liz.txt", loadFile("root/usr/murtaugh/liz.txt"),
                   timeCreated=datetime(1976, 3, 26, 17, 12, 42, 107))
     makeChildFile(fs, murtaughHomeDirINum, "myself.txt", loadFile("root/usr/murtaugh/myself.txt"),
-                  timeCreated=datetime(1976, 12, 13, 12, 51, 9, 588))
+                  permissions=FilePermissions(0o640), timeCreated=datetime(1976, 12, 13, 12, 51, 9, 588))
     makeChildFile(fs, murtaughHomeDirINum, "diary1.txt", loadFile("root/usr/murtaugh/diary1.txt"),
                   timeCreated=datetime(1977, 1, 8, 9, 2, 54, 184))
     makeChildFile(fs, murtaughHomeDirINum, "diary2.txt", loadFile("root/usr/murtaugh/diary2.txt"),

@@ -1,4 +1,4 @@
-from kernel.errors import SyscallError
+from kernel.errors import Errno, SyscallError
 from process.file_descriptor import FileMode
 from process.process_code import ProcessCode
 
@@ -23,15 +23,22 @@ class Cat(ProcessCode):
 
             try:
                 fd = self.system.open(file, FileMode.READ)
-            except SyscallError:
-                self.libc.printf(f"{file}: No such file or directory\n")
-                continue
+            except SyscallError as e:
+                if e.errno == Errno.NO_ACCESS:
+                    self.libc.printf(f"{self.command}: {file}: Permission denied\n")
+                    continue
+                elif e.errno == Errno.NO_SUCH_FILE:
+                    self.libc.printf(f"{self.command}: {file}: No such file or directory\n")
+                    continue
+                raise
 
             totalSize = 0
+            lastWasNewline = False
             while len(data := self.libc.read(fd, 1000)) > 0:
                 self.libc.printf(data)
                 totalSize += len(data)
-            if totalSize > 0 and not data.endswith("\n"):
+                lastWasNewline = data.endswith("\n")
+            if totalSize > 0 and not lastWasNewline:
                 data += "\n"
             self.libc.printf(data)
 

@@ -64,7 +64,7 @@ class Unix:
 
     def sendSyscallReturn(self, pipe: Connection, errno: Errno, value) -> None:
         if pipe:
-            pipe.send((errno, value))
+            pipe.send((value, errno))
 
     def syscallReturnSuccess(self, pid: PID, value: T) -> T:
         process = self.getProcess(pid)
@@ -313,7 +313,7 @@ class Unix:
 
         system = SystemHandle(childPid, env.copy(), userPipe, kernelPipe)
         libc = Libc(system)
-        childProcess = OsProcess(child(system, libc, argv))
+        childProcess = OsProcess(child(system, libc, command, argv))
         childProcess.run()
         childProcessEntry.pythonPid = childProcess.process.pid
 
@@ -638,6 +638,6 @@ class Unix:
         swapper.pipe = kernelPipe
         self.pipes.append(kernelPipe)
         system = SystemHandle(swapper.pid, Environment(), userPipe, kernelPipe)
-        system.fork(Sh, "sh", [])
+        pid = system.fork(Sh, "sh", [])
         while True:
             sleep(1000)

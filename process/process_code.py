@@ -7,9 +7,10 @@ if typing.TYPE_CHECKING:
 
 
 class ProcessCode:
-    def __init__(self, systemHandle: 'SystemHandle', libc: 'Libc', argv: List[str]):
+    def __init__(self, systemHandle: 'SystemHandle', libc: 'Libc', command: str, argv: List[str]):
         self.system = systemHandle
         self.libc = libc
+        self.command = command
         self.argv = argv
 
     def run(self) -> int:

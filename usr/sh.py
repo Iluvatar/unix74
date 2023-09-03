@@ -3,11 +3,13 @@ from typing import Dict, List, Tuple, Type
 
 from kernel.system_handle import SyscallError
 from process.process_code import ProcessCode
+from user import UID
 from usr.cat import Cat
 from usr.echo import Echo
 from usr.ls import Ls
 from usr.ps import Ps
 from usr.pwd import Pwd
+from usr.su import Su
 
 variables = {
     "HOME": "/usr/liz",
@@ -23,6 +25,8 @@ def tokenize(string: str) -> List[str]:
 class Sh(ProcessCode):
     def run(self):
         sys.stdin = open(0)
+
+        self.system.setuid(UID(128))
 
         lastCommand: str = ""
 
@@ -110,6 +114,7 @@ class Sh(ProcessCode):
                 "ls": Ls,
                 "pwd": Pwd,
                 "ps": Ps,
+                "su": Su,
             }
 
             if command == "cd":
