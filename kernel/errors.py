@@ -4,15 +4,14 @@ from enum import Enum, auto
 class Errno(Enum):
     NONE = 0
     UNSPECIFIED = auto()
-    PERMISSION = auto()
-    NO_ACCESS = auto()
-    NO_SUCH_FILE = auto()
-    IS_A_DIR = auto()
-    NOT_A_DIR = auto()
-    INVALID_ARG = auto()
-    FUNC_NOT_IMPLEMENTED = auto()
-    BAD_PID = auto()
-    NOT_A_CHILD = auto()
+    EPERM = auto()
+    EACCES = auto()
+    ENOENT = auto()
+    EISDIR = auto()
+    ENOTDIR = auto()
+    EINVAL = auto()
+    ENOSYS = auto()
+    ECHILD = auto()
     NOT_SUPPORTED = auto()
 
     PANIC = auto()

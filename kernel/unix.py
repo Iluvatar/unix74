@@ -135,11 +135,11 @@ class Unix:
                     if syscall in syscallDict:
                         syscallDict[syscall](pid, *args)
                     else:
-                        self.sendSyscallReturn(pipe, Errno.FUNC_NOT_IMPLEMENTED, f"Invalid syscall {syscall}")
+                        self.sendSyscallReturn(pipe, Errno.ENOSYS, f"Invalid syscall {syscall}")
                 except TypeError as e:
                     if self.printDebug:
                         traceback.print_tb(e.__traceback__)
-                    self.sendSyscallReturn(pipe, Errno.INVALID_ARG, repr(e))
+                    self.sendSyscallReturn(pipe, Errno.EINVAL, repr(e))
                 except KernelError as e:
                     if self.printDebug:
                         traceback.print_tb(e.__traceback__)
@@ -197,7 +197,7 @@ class Unix:
         try:
             return self.processes[pid]
         except KeyError:
-            raise KernelError(f"No such process {pid}", Errno.BAD_PID) from None
+            raise KernelError(f"No such process {pid}", Errno.PANIC) from None
 
     def isSuperUser(self, uid: UID):
         return uid == UID(0)
@@ -218,14 +218,14 @@ class Unix:
     def access(self, pid: PID, inode: INode, mode: Mode) -> bool:
         def checkModeSubset(m: Mode, inodeMode: Mode):
             if m not in inodeMode:
-                raise KernelError(f"Mode requested {m}, actual is {inodeMode}", Errno.NO_ACCESS)
+                raise KernelError(f"Mode requested {m}, actual is {inodeMode}", Errno.EACCES)
             return True
 
         process = self.getProcess(pid)
         if self.isSuperUser(process.uid):
             if Mode.EXEC in mode and Mode.EXEC not in (
                     inode.permissions.owner | inode.permissions.group | inode.permissions.other):
-                raise KernelError("", Errno.NO_ACCESS)
+                raise KernelError("", Errno.EACCES)
             return True
         if process.uid == inode.owner:
             return checkModeSubset(mode, inode.permissions.owner)
@@ -242,12 +242,12 @@ class Unix:
                     inode = self.filesystems[mount.mountedFsId].root()
                     break
             else:
-                raise KernelError(f"Unknown filesystem {filesystemId}", Errno.NO_SUCH_FILE)
+                raise KernelError(f"Unknown filesystem {filesystemId}", Errno.ENOENT)
         return inode
 
     def traversePath(self, pid: PID, path: str, op: INodeOperation) -> INode:
         if not self.rootNode:
-            raise KernelError("No root mount found", Errno.NO_SUCH_FILE)
+            raise KernelError("No root mount found", Errno.ENOENT)
 
         process = self.getProcess(pid)
         currentNode: INode = process.currentDir
@@ -260,7 +260,7 @@ class Unix:
             traversePath = parts[:-1]
         for part in traversePath:
             if currentNode.fileType != FileType.DIRECTORY:
-                raise KernelError(path, Errno.NO_SUCH_FILE)
+                raise KernelError(path, Errno.ENOENT)
             self.access(pid, currentNode, Mode.EXEC)
             if part == "":
                 part = "."
@@ -272,14 +272,14 @@ class Unix:
                     continue
                 covered: INode = self.filesystems[currentNode.filesystemId].covered
                 if not covered:
-                    raise KernelError(path, Errno.NO_SUCH_FILE)
+                    raise KernelError(path, Errno.ENOENT)
                 currentNode = covered
 
             try:
                 childINumber = cast(DirectoryData, currentNode.data).children[part]
                 currentNode = self.iget(currentNode.filesystemId, childINumber)
             except KeyError:
-                raise KernelError(path, Errno.NO_SUCH_FILE) from None
+                raise KernelError(path, Errno.ENOENT) from None
 
         if op == INodeOperation.GET or op == INodeOperation.DELETE:
             return currentNode
@@ -299,7 +299,7 @@ class Unix:
             self.filesystems[currentNode.filesystemId].inodes.add(child)
             return child
         else:
-            raise KernelError(f"Invalid op: {op}", Errno.FUNC_NOT_IMPLEMENTED)
+            raise KernelError(f"Invalid op: {op}", Errno.ENOSYS)
 
     def getINodeFromPath(self, pid: PID, path: str) -> INode:
         return self.traversePath(pid, path, INodeOperation.GET)
@@ -348,7 +348,7 @@ class Unix:
         try:
             inode = self.getINodeFromPath(pid, path)
         except FileNotFoundError:
-            raise KernelError(path, Errno.NO_SUCH_FILE) from None
+            raise KernelError(path, Errno.ENOENT) from None
 
         if OpenFlags.READ in flags:
             self.access(pid, inode, Mode.READ)
@@ -362,7 +362,7 @@ class Unix:
     def creat(self, pid: PID, path: str, permissions: FilePermissions) -> FD:
         inode = self.createINodeAtPath(pid, path)
         if inode.fileType == FileType.DIRECTORY:
-            raise KernelError(path, Errno.IS_A_DIR)
+            raise KernelError(path, Errno.EISDIR)
         inode.permissions = permissions
         self.access(pid, inode, Mode.WRITE)
 
@@ -392,7 +392,7 @@ class Unix:
         ofdEntry = fdEntry.openFd
 
         if OpenFlags.READ not in ofdEntry.mode:
-            raise KernelError("No read access", Errno.NO_ACCESS)
+            raise KernelError("No read access", Errno.EACCES)
 
         data = ofdEntry.file.data.read(size, ofdEntry.offset)
         ofdEntry.offset += len(data)
@@ -406,7 +406,7 @@ class Unix:
         ofdEntry = fdEntry.openFd
 
         if OpenFlags.WRITE not in ofdEntry.mode:
-            raise KernelError("No write access", Errno.NO_ACCESS)
+            raise KernelError("No write access", Errno.EACCES)
 
         if ofdEntry.mode & OpenFlags.APPEND:
             numBytes = ofdEntry.file.data.append(data)
@@ -448,7 +448,7 @@ class Unix:
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
         if ofdEntry.file.fileType != FileType.DIRECTORY:
-            raise KernelError("", Errno.NOT_A_DIR)
+            raise KernelError("", Errno.ENOTDIR)
         out: List[Dentry] = []
         for name, child in cast(DirectoryData, ofdEntry.file.data).children.items():
             out.append(Dentry(name, child, ofdEntry.file.filesystemId))
@@ -460,7 +460,7 @@ class Unix:
         process = self.getProcess(pid)
         inode = self.getINodeFromPath(pid, path)
         if inode.fileType != FileType.DIRECTORY:
-            raise KernelError(path, Errno.NO_SUCH_FILE)
+            raise KernelError(path, Errno.ENOENT)
         self.access(pid, inode, Mode.EXEC)
         process.currentDir = inode
 
@@ -479,7 +479,7 @@ class Unix:
         process = self.getProcess(pid)
         childProcess = self.getProcess(childPid)
         if childProcess.ppid != pid:
-            raise KernelError("Cannot wait on non-child", Errno.NOT_A_CHILD)
+            raise KernelError("Cannot wait on non-child", Errno.ECHILD)
 
         if childProcess.status == ProcessStatus.ZOMBIE:
             self.processes.remove(childPid)
@@ -504,7 +504,7 @@ class Unix:
             process.uid = uid
             process.realUid = uid
             return self.syscallReturnSuccess(pid, None)
-        raise KernelError("", Errno.PERMISSION)
+        raise KernelError("", Errno.EPERM)
 
     @strace
     def getgid(self, pid: PID) -> GID:
@@ -523,7 +523,7 @@ class Unix:
             process.gid = gid
             process.realGid = gid
             return self.syscallReturnSuccess(pid, None)
-        raise KernelError("", Errno.PERMISSION)
+        raise KernelError("", Errno.EPERM)
 
     @strace
     def getpid(self, pid: PID) -> PID:
@@ -537,7 +537,7 @@ class Unix:
     def mount(self, pid: PID, path: str, fs: Filesystem) -> None:
         process = self.getProcess(pid)
         if not self.isSuperUser(process.uid):
-            raise KernelError("Only superuser can mount", Errno.PERMISSION)
+            raise KernelError("Only superuser can mount", Errno.EPERM)
         inode = self.getINodeFromPath(pid, path)
         self.mounts.append(Mount(fs.uuid, inode.filesystemId, inode.iNumber))
         inode.isMount = True
@@ -549,11 +549,11 @@ class Unix:
     def umount(self, pid: PID, path: str) -> None:
         process = self.getProcess(pid)
         if not self.isSuperUser(process.uid):
-            raise KernelError("Only superuser can unmount", Errno.PERMISSION)
+            raise KernelError("Only superuser can unmount", Errno.EPERM)
         inode = self.getINodeFromPath(pid, path)
         fs = self.filesystems[inode.filesystemId]
         if inode != fs.root():
-            raise KernelError(f"{path} not currently mounted", Errno.INVALID_ARG)
+            raise KernelError(f"{path} not currently mounted", Errno.EINVAL)
         fs.covered.isMount = False
         self.mounts.remove(Mount(fs.uuid, fs.covered.filesystemId, fs.covered.iNumber))
         return self.syscallReturnSuccess(pid, None)

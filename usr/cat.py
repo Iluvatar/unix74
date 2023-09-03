@@ -24,10 +24,10 @@ class Cat(ProcessCode):
             try:
                 fd = self.system.open(file, OpenFlags.READ)
             except SyscallError as e:
-                if e.errno == Errno.NO_ACCESS:
+                if e.errno == Errno.EACCES:
                     self.libc.printf(f"{self.command}: {file}: Permission denied\n")
                     continue
-                elif e.errno == Errno.NO_SUCH_FILE:
+                elif e.errno == Errno.ENOENT:
                     self.libc.printf(f"{self.command}: {file}: No such file or directory\n")
                     continue
                 raise

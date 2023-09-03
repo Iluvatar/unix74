@@ -160,7 +160,7 @@ class DirectoryData(INodeData):
         self.__makeData()
 
     def trunc(self):
-        raise KernelError("", Errno.IS_A_DIR)
+        raise KernelError("", Errno.EISDIR)
 
     def __makeData(self) -> None:
         self.data = ""
@@ -173,7 +173,7 @@ class DirectoryData(INodeData):
 
     def addChild(self, name: str, inumber: INumber) -> None:
         if name == "":
-            raise KernelError("", Errno.NO_SUCH_FILE)
+            raise KernelError("", Errno.ENOENT)
         self.children[name] = inumber
         self.__makeData()
 
@@ -181,7 +181,7 @@ class DirectoryData(INodeData):
         try:
             del self.children[name]
         except KeyError:
-            raise KernelError("", Errno.NO_SUCH_FILE)
+            raise KernelError("", Errno.ENOENT)
         self.__makeData()
 
 
