@@ -13,6 +13,7 @@ class Errno(Enum):
     FUNC_NOT_IMPLEMENTED = auto()
     BAD_PID = auto()
     NOT_A_CHILD = auto()
+    NOT_SUPPORTED = auto()
 
     PANIC = auto()
 

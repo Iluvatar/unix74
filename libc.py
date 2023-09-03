@@ -1,7 +1,7 @@
 import typing
 from _md5 import md5
 
-from process.file_descriptor import FD, FileMode, SeekFrom
+from process.file_descriptor import FD, OpenFlags, SeekFrom
 from user import UID
 
 if typing.TYPE_CHECKING:
@@ -29,7 +29,7 @@ class Libc:
             text += data
         return text
 
-    def open(self, path: str, mode: FileMode = FileMode.READ) -> FD:
+    def open(self, path: str, mode: OpenFlags = OpenFlags.READ) -> FD:
         return self.system.open(path, mode)
 
     def lseek(self, fd: FD, offset: int, whence: SeekFrom) -> int:
@@ -54,7 +54,7 @@ class Libc:
         return self.system.env.setVar(var, value)
 
     def getPw(self, uid: UID) -> str:
-        fd = self.open("/etc/passwd", FileMode.READ)
+        fd = self.open("/etc/passwd", OpenFlags.READ)
         file = ""
         while len(data := self.read(fd, 100)):
             file += data

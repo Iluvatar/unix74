@@ -2,9 +2,10 @@ from multiprocessing.connection import Connection
 from typing import List, Tuple, Type
 
 from environment import Environment
+from filesystem.filesystem import FilePermissions
 from filesystem.filesystem_utils import Dentry, Stat
 from kernel.errors import Errno, SyscallError
-from process.file_descriptor import FD, FileMode, PID, SeekFrom
+from process.file_descriptor import FD, OpenFlags, PID, SeekFrom
 from process.process_code import ProcessCode
 from user import GID, UID
 
@@ -38,8 +39,11 @@ class SystemHandle:
     def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
         return self.__syscall("fork", child, command, argv, self.env)
 
-    def open(self, path: str, mode: FileMode) -> FD:
+    def open(self, path: str, mode: OpenFlags) -> FD:
         return self.__syscall("open", path, mode)
+
+    def creat(self, path: str, permissions: FilePermissions) -> FD:
+        return self.__syscall("creat", path, permissions)
 
     def lseek(self, fd: FD, offset: int, whence: SeekFrom) -> FD:
         return self.__syscall("lseek", fd, offset, whence)
@@ -86,8 +90,8 @@ class SystemHandle:
     def getpid(self) -> PID:
         return self.__syscall("getpid")
 
-    def exit(self, exitCode: int) -> None:
-        return self.__syscall("exit", exitCode)
-
     def umount(self, path: str) -> None:
         return self.__syscall("umount", path)
+
+    def exit(self, exitCode: int) -> None:
+        return self.__syscall("exit", exitCode)

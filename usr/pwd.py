@@ -1,7 +1,7 @@
 from typing import List
 
 from kernel.errors import SyscallError
-from process.file_descriptor import FileMode
+from process.file_descriptor import OpenFlags
 from process.process_code import ProcessCode
 
 
@@ -11,7 +11,7 @@ class Pwd(ProcessCode):
         while True:
             childStat = self.system.stat(".")
             parentStat = self.system.stat("..")
-            parentFd = self.system.open("..", FileMode.READ)
+            parentFd = self.system.open("..", OpenFlags.READ)
             siblings = self.system.getdents(parentFd)
 
             useStat = childStat.filesystemId != parentStat.filesystemId

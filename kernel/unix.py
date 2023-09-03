@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import select
+import traceback
 from collections.abc import Callable
 from datetime import datetime
 from multiprocessing import Pipe
@@ -16,7 +17,7 @@ from filesystem.filesystem_utils import Dentry, INodeOperation, Mount, Stat
 from kernel.errors import Errno, KernelError
 from kernel.system_handle import SystemHandle
 from libc import Libc
-from process.file_descriptor import FD, FileMode, OFD, OpenFileDescriptor, PID, SeekFrom
+from process.file_descriptor import FD, OFD, OpenFileDescriptor, OpenFlags, PID, SeekFrom
 from process.process import OsProcess, ProcessEntry, ProcessFileDescriptor, ProcessStatus
 from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
@@ -42,6 +43,7 @@ class Unix:
         self.pipes: List[Connection] = []
 
         self.doStrace: bool = False
+        self.printDebug = False
 
     def __str__(self):
         out = "Unix74\n------\n"
@@ -98,6 +100,7 @@ class Unix:
 
             "fork": self.fork,
             "open": self.open,
+            "creat": self.creat,
             "lseek": self.lseek,
             "read": self.read,
             "write": self.write,
@@ -113,8 +116,8 @@ class Unix:
             "getegid": self.getegid,
             "setgid": self.setgid,
             "getpid": self.getpid,
-            "exit": self.exit,
             "umount": self.umount,
+            "exit": self.exit,
         }
 
         while True:
@@ -134,10 +137,16 @@ class Unix:
                     else:
                         self.sendSyscallReturn(pipe, Errno.FUNC_NOT_IMPLEMENTED, f"Invalid syscall {syscall}")
                 except TypeError as e:
+                    if self.printDebug:
+                        traceback.print_tb(e.__traceback__)
                     self.sendSyscallReturn(pipe, Errno.INVALID_ARG, repr(e))
                 except KernelError as e:
+                    if self.printDebug:
+                        traceback.print_tb(e.__traceback__)
                     self.sendSyscallReturn(pipe, e.errno, repr(e))
                 except Exception as e:
+                    if self.printDebug:
+                        traceback.print_tb(e.__traceback__)
                     self.sendSyscallReturn(pipe, Errno.PANIC, repr(e))
 
     @staticmethod
@@ -284,9 +293,11 @@ class Unix:
                 pass
 
             self.access(pid, currentNode, Mode.WRITE)
-            child = INode(fs.claimNextINumber(), currentNode.permissions, FileType.NONE, process.uid, process.gid,
+            child = INode(fs.claimNextINumber(), currentNode.permissions, FileType.REGULAR, process.uid, process.gid,
                           datetime.now(), datetime.now(), INodeData(), fs.uuid)
             cast(DirectoryData, currentNode.data).addChild(parts[-1], child.iNumber)
+            self.filesystems[currentNode.filesystemId].inodes.add(child)
+            return child
         else:
             raise KernelError(f"Invalid op: {op}", Errno.FUNC_NOT_IMPLEMENTED)
 
@@ -319,25 +330,43 @@ class Unix:
 
         return self.syscallReturnSuccess(pid, childPid)
 
-    @strace
-    def open(self, pid: PID, path: str, mode: FileMode) -> FD:
+    def createFd(self, inode: INode, flags: OpenFlags, pid: PID) -> FD:
         process = self.getProcess(pid)
-        try:
-            inode = self.getINodeFromPath(pid, path)
-        except FileNotFoundError:
-            raise KernelError(path, Errno.NO_SUCH_FILE)
-
-        if FileMode.READ in mode:
-            self.access(pid, inode, Mode.READ)
-        if (FileMode.WRITE | FileMode.APPEND | FileMode.CREATE | FileMode.TRUNCATE) & mode:
-            self.access(pid, inode, Mode.WRITE)
-            mode |= FileMode.WRITE
-
-        ofd = OpenFileDescriptor(self.claimNextOftId(), mode, inode)
+        ofd = OpenFileDescriptor(self.claimNextOftId(), flags, inode)
         self.openFileTable.add(ofd)
         processFdNum: FD = process.claimNextFdNum()
         process.fdTable.add(ProcessFileDescriptor(processFdNum, ofd))
 
+        if flags & OpenFlags.TRUNCATE:
+            inode.data.trunc()
+            ofd.offset = 0
+
+        return processFdNum
+
+    @strace
+    def open(self, pid: PID, path: str, flags: OpenFlags) -> FD:
+        try:
+            inode = self.getINodeFromPath(pid, path)
+        except FileNotFoundError:
+            raise KernelError(path, Errno.NO_SUCH_FILE) from None
+
+        if OpenFlags.READ in flags:
+            self.access(pid, inode, Mode.READ)
+        if (OpenFlags.WRITE | OpenFlags.APPEND | OpenFlags.CREATE | OpenFlags.TRUNCATE) & flags:
+            self.access(pid, inode, Mode.WRITE)
+            flags |= OpenFlags.WRITE
+
+        processFdNum = self.createFd(inode, flags, pid)
+        return self.syscallReturnSuccess(pid, processFdNum)
+
+    def creat(self, pid: PID, path: str, permissions: FilePermissions) -> FD:
+        inode = self.createINodeAtPath(pid, path)
+        if inode.fileType == FileType.DIRECTORY:
+            raise KernelError(path, Errno.IS_A_DIR)
+        inode.permissions = permissions
+        self.access(pid, inode, Mode.WRITE)
+
+        processFdNum = self.createFd(inode, OpenFlags.WRITE | OpenFlags.TRUNCATE, pid)
         return self.syscallReturnSuccess(pid, processFdNum)
 
     @strace
@@ -362,8 +391,8 @@ class Unix:
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
 
-        if FileMode.READ not in ofdEntry.mode:
-            raise KernelError("", Errno.NO_ACCESS)
+        if OpenFlags.READ not in ofdEntry.mode:
+            raise KernelError("No read access", Errno.NO_ACCESS)
 
         data = ofdEntry.file.data.read(size, ofdEntry.offset)
         ofdEntry.offset += len(data)
@@ -376,11 +405,15 @@ class Unix:
         fdEntry = process.fdTable[fd]
         ofdEntry = fdEntry.openFd
 
-        if FileMode.WRITE not in ofdEntry.mode:
-            raise KernelError("", Errno.NO_ACCESS)
+        if OpenFlags.WRITE not in ofdEntry.mode:
+            raise KernelError("No write access", Errno.NO_ACCESS)
 
-        numBytes = ofdEntry.file.data.write(data, ofdEntry.offset)
-        ofdEntry.offset += numBytes
+        if ofdEntry.mode & OpenFlags.APPEND:
+            numBytes = ofdEntry.file.data.append(data)
+            ofdEntry.offset = ofdEntry.file.data.size()
+        else:
+            numBytes = ofdEntry.file.data.write(data, ofdEntry.offset)
+            ofdEntry.offset += numBytes
 
         return self.syscallReturnSuccess(pid, numBytes)
 

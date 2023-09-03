@@ -7,12 +7,6 @@ class DevNull(SpecialFileData):
     def read(self, size, offset):
         return ""
 
-    def write(self, data, offset):
-        pass
-
-    def append(self, data):
-        pass
-
 
 class DevConsole(SpecialFileData):
     def read(self, size, offset):
@@ -37,9 +31,3 @@ class Mem(SpecialFileData):
             lines.append(".".join([str(process.pid), str(process.uid), str(process.tty), process.command]))
         string = "\n".join(lines)
         return string[offset:offset + size]
-
-    def write(self, data, offset):
-        pass
-
-    def append(self, data):
-        pass

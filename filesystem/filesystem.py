@@ -8,6 +8,7 @@ from enum import Enum, IntFlag, auto
 from typing import Dict
 from uuid import UUID
 
+from kernel.errors import Errno, KernelError
 from self_keyed_dict import SelfKeyedDict
 from user import GID, UID
 
@@ -91,8 +92,10 @@ class FilePermissions:
 
     @staticmethod
     def parsePermissions(permissions: int) -> (SetId, Mode, Mode, Mode):
-        if permissions < 0 or permissions >= 8 ** 4:
-            raise ValueError(f"Invalid file permissions '{permissions}'")
+        if permissions < 0:
+            permissions = 0
+        else:
+            permissions %= 8 ** 4
         otherPermissions = permissions % 8
         groupPermissions = (permissions // 8) % 8
         ownerPermissions = (permissions // 8 ** 2) % 8
@@ -140,6 +143,10 @@ class INodeData:
         self.data += data
         return len(data)
 
+    def trunc(self) -> int:
+        self.data = ""
+        return 0
+
     def size(self) -> int:
         return len(self.data)
 
@@ -152,26 +159,29 @@ class DirectoryData(INodeData):
         self.children: Dict[str, INumber] = children
         self.__makeData()
 
-    def __makeData(self):
+    def trunc(self):
+        raise KernelError("", Errno.IS_A_DIR)
+
+    def __makeData(self) -> None:
         self.data = ""
         for name, inumber in self.children.items():
             self.data += f"{name}{inumber}"
 
-    def addChildren(self, children: Dict[str, INumber]):
+    def addChildren(self, children: Dict[str, INumber]) -> None:
         for name, inumber in children.items():
             self.addChild(name, inumber)
 
-    def addChild(self, name: str, inumber: INumber):
+    def addChild(self, name: str, inumber: INumber) -> None:
         if name == "":
-            raise ValueError("File names cannot be empty")
+            raise KernelError("", Errno.NO_SUCH_FILE)
         self.children[name] = inumber
         self.__makeData()
 
-    def removeChild(self, name: str):
+    def removeChild(self, name: str) -> None:
         try:
             del self.children[name]
         except KeyError:
-            raise FileNotFoundError() from None
+            raise KernelError("", Errno.NO_SUCH_FILE)
         self.__makeData()
 
 
@@ -180,15 +190,6 @@ class RegularFileData(INodeData):
         super().__init__()
         self.data = data
 
-    def read(self, size, offset):
-        return self.data[offset:offset + size]
-
-    def write(self, data, offset):
-        self.data = self.data[:offset] + data
-
-    def append(self, data):
-        self.data += data
-
 
 class SpecialFileData(INodeData):
     def __init__(self, unix: Unix):
@@ -196,13 +197,16 @@ class SpecialFileData(INodeData):
         self.unix = unix
 
     def read(self, size, offset):
-        raise NotImplementedError()
+        pass
 
     def write(self, data, offset):
-        raise NotImplementedError()
+        pass
 
     def append(self, data):
-        raise NotImplementedError()
+        pass
+
+    def trunc(self):
+        pass
 
 
 class Filesystem:

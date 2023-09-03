@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 import typing
 from collections.abc import Callable, MutableSet
 from dataclasses import dataclass, field
@@ -96,7 +97,8 @@ class OsProcess:
         try:
             exitCode = self.code.run()
         except Exception as e:
-            print("exception", e)
+            traceback.print_tb(e.__traceback__)
+            print(repr(e))
 
         try:
             self.code.system.exit(exitCode)

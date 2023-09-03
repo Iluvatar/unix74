@@ -1,5 +1,5 @@
 from kernel.errors import Errno, SyscallError
-from process.file_descriptor import FileMode
+from process.file_descriptor import OpenFlags
 from process.process_code import ProcessCode
 
 
@@ -22,7 +22,7 @@ class Cat(ProcessCode):
                 continue
 
             try:
-                fd = self.system.open(file, FileMode.READ)
+                fd = self.system.open(file, OpenFlags.READ)
             except SyscallError as e:
                 if e.errno == Errno.NO_ACCESS:
                     self.libc.printf(f"{self.command}: {file}: Permission denied\n")

@@ -4,7 +4,7 @@ from typing import Dict, List
 from filesystem.filesystem import FileType, Mode, SetId
 from filesystem.filesystem_utils import Stat
 from kernel.errors import SyscallError
-from process.file_descriptor import FileMode
+from process.file_descriptor import OpenFlags
 from process.process_code import ProcessCode
 from user import GID, UID
 
@@ -61,7 +61,7 @@ class Ls(ProcessCode):
 
         def getUidToUserDict() -> Dict[UID, str]:
             userDict: Dict[UID, str] = {}
-            passwdFd = self.system.open("/etc/passwd", FileMode.READ)
+            passwdFd = self.system.open("/etc/passwd", OpenFlags.READ)
             contents = self.libc.readAll(passwdFd)
             self.system.close(passwdFd)
             lines = contents.split("\n")
@@ -79,7 +79,7 @@ class Ls(ProcessCode):
 
         def getGidToGroupDict() -> Dict[GID, str]:
             groupDict: Dict[GID, str] = {}
-            groupFd = self.system.open("/etc/group", FileMode.READ)
+            groupFd = self.system.open("/etc/group", OpenFlags.READ)
             contents = self.libc.readAll(groupFd)
             self.system.close(groupFd)
             lines = contents.split("\n")
@@ -97,7 +97,7 @@ class Ls(ProcessCode):
         def permissionString(stat: Stat) -> str:
             perms = stat.permissions
 
-            s = fileTypeChar[stat.fileType]
+            s = fileTypeChar.get(stat.fileType, "?")
             s += "r" if perms.owner & Mode.READ else "-"
             s += "w" if perms.owner & Mode.WRITE else "-"
             s += "s" if perms.high & SetId.SET_UID else "x" if perms.owner & Mode.EXEC else "-"
@@ -127,7 +127,7 @@ class Ls(ProcessCode):
 
         for index, path in enumerate(sorted(paths)):
             try:
-                fd = self.system.open(path, FileMode.READ)
+                fd = self.system.open(path, OpenFlags.READ)
             except SyscallError:
                 notFoundFiles.append(f"{path} not found\n")
                 continue

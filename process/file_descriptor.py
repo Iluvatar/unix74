@@ -13,7 +13,7 @@ class BadFileNumberError(Exception):
     pass
 
 
-class FileMode(Flag):
+class OpenFlags(Flag):
     READ = auto()
     WRITE = auto()
     READ_WRITE = READ | WRITE
@@ -31,7 +31,7 @@ class SeekFrom(Enum):
 @dataclass
 class OpenFileDescriptor:
     id: OFD
-    mode: FileMode
+    mode: OpenFlags
     file: INode
     refCount: int = 1
     offset: int = 0

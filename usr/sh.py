@@ -1,7 +1,7 @@
 import sys
 from typing import Dict, List, Tuple, Type
 
-from kernel.system_handle import SyscallError
+from kernel.errors import SyscallError
 from process.process_code import ProcessCode
 from user import UID
 from usr.cat import Cat
