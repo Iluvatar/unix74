@@ -1,11 +1,21 @@
 import typing
 from _md5 import md5
+from getpass import getpass
 
+from kernel.errors import Errno
 from process.file_descriptor import FD, OpenFlags, SeekFrom
-from user import UID
 
 if typing.TYPE_CHECKING:
     from kernel.unix import SystemHandle
+
+
+class LibcError(Exception):
+    def __init__(self, message: str, errno: Errno):
+        super(LibcError, self).__init__(message)
+        self.errno = errno
+
+    def __str__(self):
+        return f"{str(self.errno)}: {self.args[0]}"
 
 
 class Libc:
@@ -22,6 +32,9 @@ class Libc:
 
     def readline(self) -> str:
         return input()
+
+    def readPassword(self) -> str:
+        return getpass("")
 
     def readAll(self, fd: FD) -> str:
         text = ""
@@ -53,7 +66,7 @@ class Libc:
     def setenv(self, var: str, value: str) -> None:
         return self.system.env.setVar(var, value)
 
-    def getPw(self, uid: UID) -> str:
+    def getPw(self, name: str) -> str:
         fd = self.open("/etc/passwd", OpenFlags.READ)
         file = ""
         while len(data := self.read(fd, 100)):
@@ -62,11 +75,11 @@ class Libc:
         lines = file.split("\n")
         for line in lines:
             try:
-                _, _, uidStr, _, _, _, _ = line.split(":")
+                user, _, _, _, _, _, _ = line.split(":")
             except ValueError:
                 continue
 
-            if uid == int(uidStr):
+            if user == name:
                 return line
 
-        raise ValueError(f"No such user {uid}")
+        raise LibcError(f"No such user {name}", 1)

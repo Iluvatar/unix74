@@ -600,9 +600,8 @@ class Unix:
         cast(DirectoryData, parentInode.data).removeChild(childName)
         childInode.references -= 1
 
-        # TODO remove debugging
         if childInode.references == 0:
-            print("Removing file", childName)
+            self.filesystems[childInode.filesystemId].inodes.remove(childInode.iNumber)
 
         return self.syscallReturnSuccess(pid, None)
 

@@ -1,3 +1,5 @@
+import sys
+
 from kernel.errors import Errno, SyscallError
 from process.file_descriptor import OpenFlags
 from process.process_code import ProcessCode
@@ -5,6 +7,8 @@ from process.process_code import ProcessCode
 
 class Cat(ProcessCode):
     def run(self) -> int:
+        sys.stdin = open(0)
+
         def readFromInput():
             try:
                 while True:

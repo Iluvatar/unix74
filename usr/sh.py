@@ -3,7 +3,6 @@ from typing import Dict, List, Tuple, Type
 
 from kernel.errors import SyscallError
 from process.process_code import ProcessCode
-from user import UID
 from usr.cat import Cat
 from usr.echo import Echo
 from usr.ln import Ln
@@ -28,7 +27,7 @@ class Sh(ProcessCode):
     def run(self):
         sys.stdin = open(0)
 
-        self.system.setuid(UID(128))
+        # self.system.setuid(UID(128))
 
         lastCommand: str = ""
 

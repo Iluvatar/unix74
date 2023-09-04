@@ -12,7 +12,7 @@ from types import FrameType
 from typing import List, Tuple
 
 from filesystem.filesystem import INode
-from kernel.errors import Errno
+from kernel.errors import Errno, SyscallError
 from process.file_descriptor import FD, PID, ProcessFileDescriptor
 from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
@@ -96,6 +96,8 @@ class OsProcess:
         exitCode = Errno.UNSPECIFIED
         try:
             exitCode = self.code.run()
+        except SyscallError as e:
+            pass
         except Exception as e:
             traceback.print_tb(e.__traceback__)
             print(repr(e))
