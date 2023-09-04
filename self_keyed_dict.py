@@ -18,8 +18,8 @@ class SelfKeyedDict(Generic[Type, KeyType]):
     def __contains__(self, key: KeyType) -> bool:
         return key in self.backingDict
 
-    def __getitem__(self, keyValue: KeyType) -> Type:
-        return self.backingDict[keyValue]
+    def __getitem__(self, key: KeyType) -> Type:
+        return self.backingDict[key]
 
     def __setitem__(self, key: KeyType, value: Type) -> None:
         raise Exception("Use add(item) to add values")
@@ -30,6 +30,9 @@ class SelfKeyedDict(Generic[Type, KeyType]):
     def add(self, item: Type) -> None:
         key: KeyType = getattr(item, self.key)
         self.backingDict[key] = item
+
+    def get(self, key: KeyType, default=None):
+        return self.backingDict.get(key, default)
 
     def remove(self, key: KeyType) -> None:
         del self.backingDict[key]

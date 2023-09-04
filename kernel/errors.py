@@ -7,12 +7,14 @@ class Errno(Enum):
     EPERM = auto()
     EACCES = auto()
     ENOENT = auto()
+    EEXIST = auto()
     EISDIR = auto()
     ENOTDIR = auto()
     EINVAL = auto()
     ENOSYS = auto()
     ECHILD = auto()
-    NOT_SUPPORTED = auto()
+    ESRCH = auto()
+    EXDEV = auto()
 
     PANIC = auto()
 

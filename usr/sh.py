@@ -6,9 +6,11 @@ from process.process_code import ProcessCode
 from user import UID
 from usr.cat import Cat
 from usr.echo import Echo
+from usr.ln import Ln
 from usr.ls import Ls
 from usr.ps import Ps
 from usr.pwd import Pwd
+from usr.rm import Rm
 from usr.su import Su
 
 variables = {
@@ -115,6 +117,8 @@ class Sh(ProcessCode):
                 "pwd": Pwd,
                 "ps": Ps,
                 "su": Su,
+                "ln": Ln,
+                "rm": Rm,
             }
 
             if command == "cd":

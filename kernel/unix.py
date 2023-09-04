@@ -105,6 +105,8 @@ class Unix:
             "read": self.read,
             "write": self.write,
             "close": self.close,
+            "link": self.link,
+            "unlink": self.unlink,
             "chdir": self.chdir,
             "getdents": self.getdents,
             "stat": self.stat,
@@ -197,7 +199,7 @@ class Unix:
         try:
             return self.processes[pid]
         except KeyError:
-            raise KernelError(f"No such process {pid}", Errno.PANIC) from None
+            raise KernelError(f"No such process {pid}", Errno.ESRCH) from None
 
     def isSuperUser(self, uid: UID):
         return uid == UID(0)
@@ -256,11 +258,11 @@ class Unix:
 
         parts = path.rstrip("/").split("/")
         traversePath = parts
-        if op == INodeOperation.CREATE or op == INodeOperation.DELETE:
+        if op in [INodeOperation.CREATE, INodeOperation.CREATE_EXCLUSIVE, INodeOperation.PARENT]:
             traversePath = parts[:-1]
         for part in traversePath:
             if currentNode.fileType != FileType.DIRECTORY:
-                raise KernelError(path, Errno.ENOENT)
+                raise KernelError(path, Errno.ENOTDIR)
             self.access(pid, currentNode, Mode.EXEC)
             if part == "":
                 part = "."
@@ -281,16 +283,18 @@ class Unix:
             except KeyError:
                 raise KernelError(path, Errno.ENOENT) from None
 
-        if op == INodeOperation.GET or op == INodeOperation.DELETE:
+        if op == INodeOperation.GET or op == INodeOperation.PARENT:
             return currentNode
-        elif op == INodeOperation.CREATE:
+        elif op == INodeOperation.CREATE or op == INodeOperation.CREATE_EXCLUSIVE:
             name = parts[-1]
             fs = self.filesystems[currentNode.filesystemId]
 
-            try:
-                return fs.inodes[cast(DirectoryData, currentNode.data).children[name]]
-            except KeyError:
-                pass
+            inode = fs.inodes.get(cast(DirectoryData, currentNode.data).children[name], None)
+            if inode:
+                if op == INodeOperation.CREATE_EXCLUSIVE:
+                    raise KernelError(path, Errno.EEXIST)
+                else:
+                    return inode
 
             self.access(pid, currentNode, Mode.WRITE)
             child = INode(fs.claimNextINumber(), currentNode.permissions, FileType.REGULAR, process.uid, process.gid,
@@ -304,11 +308,14 @@ class Unix:
     def getINodeFromPath(self, pid: PID, path: str) -> INode:
         return self.traversePath(pid, path, INodeOperation.GET)
 
-    def createINodeAtPath(self, pid: PID, path: str) -> INode:
-        return self.traversePath(pid, path, INodeOperation.CREATE)
+    def createINodeAtPath(self, pid: PID, path: str, exclusive: bool = False) -> INode:
+        if exclusive:
+            return self.traversePath(pid, path, INodeOperation.CREATE_EXCLUSIVE)
+        else:
+            return self.traversePath(pid, path, INodeOperation.CREATE)
 
     def getINodeParentFromPath(self, pid: PID, path: str) -> INode:
-        return self.traversePath(pid, path, INodeOperation.DELETE)
+        return self.traversePath(pid, path, INodeOperation.PARENT)
 
     # System calls
 
@@ -560,54 +567,44 @@ class Unix:
 
     @strace
     def link(self, pid: PID, target: str, alias: str) -> None:
-        process = self.getProcess(pid)
         targetInode = self.getINodeFromPath(pid, target)
+        if targetInode.fileType == FileType.DIRECTORY:
+            raise KernelError(target, Errno.EISDIR)
 
-        if targetInode.fileType == FileType.DIRECTORY or alias.endswith("/"):
-            if not (targetInode.fileType == FileType.DIRECTORY and self.isSuperUser(process.uid)):
-                raise KernelError("Cannot hard link directories")
-            alias = alias.rstrip("/")
+        parent = self.getINodeParentFromPath(pid, alias)
+        if targetInode.filesystemId != parent.filesystemId:
+            raise KernelError("", Errno.EXDEV)
 
-        # cannot overwrite an existing file
         try:
             self.getINodeFromPath(pid, alias)
-            raise FileExistsError()
-        except FileNotFoundError:
-            pass
+        except KernelError as e:
+            if e.errno != Errno.ENOENT:
+                raise
 
-        aliasParts = alias.split("/")
-        aliasFile = aliasParts[-1]
-        aliasParent = "/".join(aliasParts[:-1])
-
-        aliasParentInode = self.getINodeFromPath(pid, aliasParent)
-        self.access(pid, aliasParentInode, Mode.WRITE)
-        cast(DirectoryData, aliasParentInode.data).addChild(aliasFile, targetInode)
+        childName = alias.split("/")[-1]
+        cast(DirectoryData, parent.data).addChild(childName, targetInode.iNumber)
         targetInode.references += 1
+
+        return self.syscallReturnSuccess(pid, None)
 
     @strace
     def unlink(self, pid: PID, target: str) -> None:
-        process = self.getProcess(pid)
         parentInode = self.getINodeParentFromPath(pid, target)
         childInode = self.getINodeFromPath(pid, target)
 
+        if childInode.fileType == FileType.DIRECTORY:
+            raise KernelError(target, Errno.EISDIR)
+
         self.access(pid, parentInode, Mode.WRITE)
-        if childInode.fileType == FileType.DIRECTORY and not self.isSuperUser(process.uid):
-            raise KernelError("Cannot unlink directories")
-
-        childName: str = ""
-        for name, child in cast(DirectoryData, parentInode.data).children.items():
-            if child.iNumber == childInode.iNumber:
-                childName = name
-                break
-        else:
-            raise KernelError("Could not find child in parent")
-
+        childName = target.split("/")[-1]
         cast(DirectoryData, parentInode.data).removeChild(childName)
         childInode.references -= 1
 
         # TODO remove debugging
         if childInode.references == 0:
             print("Removing file", childName)
+
+        return self.syscallReturnSuccess(pid, None)
 
     @strace
     def mkdir(self, pid: PID, path: str, permissions: FilePermissions) -> int:

@@ -46,4 +46,5 @@ class Stat:
 class INodeOperation(Enum):
     GET = auto()
     CREATE = auto()
-    DELETE = auto()
+    CREATE_EXCLUSIVE = auto()
+    PARENT = auto()

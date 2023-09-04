@@ -57,6 +57,12 @@ class SystemHandle:
     def close(self, fd: FD) -> None:
         return self.__syscall("close", fd)
 
+    def link(self, target: str, alias: str) -> None:
+        return self.__syscall("link", target, alias)
+
+    def unlink(self, target: str) -> None:
+        return self.__syscall("unlink", target)
+
     def chdir(self, path: str) -> None:
         return self.__syscall("chdir", path)
 
