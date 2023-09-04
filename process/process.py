@@ -96,6 +96,8 @@ class OsProcess:
         exitCode = Errno.UNSPECIFIED
         try:
             exitCode = self.code.run()
+            if exitCode is None:
+                exitCode = 0
         except SyscallError as e:
             pass
         except Exception as e:

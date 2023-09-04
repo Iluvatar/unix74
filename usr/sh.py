@@ -1,4 +1,5 @@
 import sys
+from enum import IntEnum
 from typing import Dict, List, Tuple, Type
 
 from kernel.errors import SyscallError
@@ -15,8 +16,16 @@ from usr.su import Su
 variables = {
     "HOME": "/usr/liz",
     "PATH": "/etc:/bin:/usr:.",
-    "PS1": r"[\u@\h \W]\$ "
+    "PS1": r"[\u@\h \W]\$ ",
+    "?": "0",
 }
+
+
+class ShellError(IntEnum):
+    EXIT_TIMEDOUT = 124,  # Time expired before child completed.
+    EXIT_CANCELED = 125,  # Internal error prior to exec attempt.
+    EXIT_CANNOT_INVOKE = 126,  # Program located, but not usable.
+    EXIT_ENOENT = 127  # Could not find program to exec.
 
 
 def tokenize(string: str) -> List[str]:
@@ -24,7 +33,7 @@ def tokenize(string: str) -> List[str]:
 
 
 class Sh(ProcessCode):
-    def run(self):
+    def run(self) -> int:
         sys.stdin = open(0)
 
         # self.system.setuid(UID(128))
@@ -131,6 +140,10 @@ class Sh(ProcessCode):
                     self.libc.printf(f"{e}\n")
             elif command in commandDict:
                 pid = self.system.fork(commandDict[command], command, args)
-                self.system.waitpid(pid)
+                _, exitCode = self.system.waitpid(pid)
+                self.libc.setenv("?", str(exitCode))
             else:
                 self.libc.printf("Invalid command\n")
+                self.libc.setenv("?", str(ShellError.EXIT_ENOENT))
+
+        return 0

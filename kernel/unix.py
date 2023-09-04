@@ -642,7 +642,7 @@ class Unix:
             parentProcess = self.getProcess(process.ppid)
             if parentProcess.status == ProcessStatus.WAITING:
                 self.processes.remove(process.pid)
-                self.syscallReturnSuccess(process.ppid, pid)
+                self.syscallReturnSuccess(process.ppid, (pid, exitCode))
 
         # make sure actual process terminates
         if process.pipe:

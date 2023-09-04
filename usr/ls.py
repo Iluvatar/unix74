@@ -204,3 +204,5 @@ class Ls(ProcessCode):
             if len(notFoundFiles) > 0 or index > 0:
                 self.libc.printf("\n")
             self.libc.printf(entry)
+
+        return 0
