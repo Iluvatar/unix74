@@ -1,7 +1,7 @@
-from enum import Enum, auto
+from enum import IntEnum, auto
 
 
-class Errno(Enum):
+class Errno(IntEnum):
     NONE = 0
     UNSPECIFIED = auto()
     EPERM = auto()
@@ -15,8 +15,10 @@ class Errno(Enum):
     ECHILD = auto()
     ESRCH = auto()
     EXDEV = auto()
+    ENOEXEC = auto()
+    EINTR = auto()
 
-    PANIC = auto()
+    PANIC = 255
 
 
 class KernelError(Exception):

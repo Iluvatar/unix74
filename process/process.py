@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import traceback
-import typing
 from collections.abc import Callable, MutableSet
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -9,7 +8,7 @@ from multiprocessing import Process
 from multiprocessing.connection import Connection
 from signal import Signals, signal
 from types import FrameType
-from typing import List, Tuple
+from typing import List, TYPE_CHECKING, Tuple
 
 from filesystem.filesystem import INode
 from kernel.errors import Errno, SyscallError
@@ -18,7 +17,7 @@ from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
 from user import GID, UID
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     pass
 
 
@@ -36,6 +35,7 @@ class ProcessEntry:
     realUid: UID
     realGid: GID
     currentDir: INode
+    process: OsProcess
     uid: UID | None = None
     gid: GID | None = None
     pipe: Connection | None = None
@@ -99,6 +99,7 @@ class OsProcess:
             if exitCode is None:
                 exitCode = 0
         except SyscallError as e:
+            exitCode = e.errno
             pass
         except Exception as e:
             traceback.print_tb(e.__traceback__)

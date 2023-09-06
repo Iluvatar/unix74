@@ -11,9 +11,12 @@ class Ln(ProcessCode):
         target = self.argv[0]
         alias = self.argv[1]
 
+        exitCode: int = 0
+
         try:
             self.system.link(target, alias)
         except SyscallError as e:
+            exitCode = 1
             if e.errno == Errno.EACCES:
                 print(f"ln: permission denied")
             elif e.errno == Errno.EISDIR:
@@ -23,4 +26,4 @@ class Ln(ProcessCode):
             elif e.errno == Errno.EXDEV:
                 print(f"ln: cannot link across filesystems")
             raise
-        return 0
+        return exitCode

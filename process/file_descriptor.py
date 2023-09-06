@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum, Flag, auto
-from typing import NewType
+from typing import NewType, TYPE_CHECKING
 
-from filesystem.filesystem import INode
+if TYPE_CHECKING:
+    from filesystem.filesystem import INode
 
 PID = NewType("PID", int)
 FD = NewType("FD", int)
@@ -32,7 +33,7 @@ class SeekFrom(Enum):
 class OpenFileDescriptor:
     id: OFD
     mode: OpenFlags
-    file: INode
+    file: 'INode'
     refCount: int = 1
     offset: int = 0
 

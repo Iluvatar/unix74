@@ -11,10 +11,6 @@ from stream import InputStream, OutputStream, makePipe
 from tokenizer import NaiveTokenizer, Token
 
 
-# allCommands: List[Type[Command]] = [Cat, Rev, Yes, Head, Tail, Sort]
-# commandLookup: Dict[str, Type[Command]] = {command.name: command for command in allCommands}
-
-
 class BashException(Exception):
     pass
 

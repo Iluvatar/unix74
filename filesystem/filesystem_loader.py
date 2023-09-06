@@ -1,17 +1,28 @@
 from __future__ import annotations
 
-import typing
 from collections import defaultdict
 from datetime import datetime
-from typing import DefaultDict
+from typing import DefaultDict, TYPE_CHECKING, cast
 from uuid import uuid4
 
 from filesystem.dev_files import DevConsole, DevNull, Mem
-from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, INumber, Mode, \
-    RegularFileData, SetId
+from filesystem.filesystem import BinaryFileData, DirectoryData, FilePermissions, Filesystem, INode, INodeData, INumber, \
+    RegularFileData
+from filesystem.flags import FileType, Mode, SetId
 from user import GID, UID
+from usr.cat import Cat
+from usr.demo import Demo
+from usr.echo import Echo
+from usr.ln import Ln
+from usr.ls import Ls
+from usr.mkdir import Mkdir
+from usr.mv import Mv
+from usr.ps import Ps
+from usr.pwd import Pwd
+from usr.rm import Rm
+from usr.su import Su
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from kernel.unix import Unix
 
 origTime = datetime(1974, 10, 17, 10, 14, 27, 387)
@@ -52,7 +63,7 @@ def makeChild(fs: Filesystem, parentINum: INumber, name: str, filetype: FileType
 
     child = fs.add(
         INode(fs.claimNextINumber(), permissions, filetype, owner, group, timeCreated, timeModified, data, fs.uuid))
-    typing.cast(DirectoryData, parent.data).addChild(name, child.iNumber)
+    cast(DirectoryData, parent.data).addChild(name, child.iNumber)
     return child.iNumber
 
 
@@ -63,7 +74,7 @@ def makeChildDir(fs: Filesystem, parentINum: INumber, name: str, *, permissions:
     childINum = makeChild(fs, parentINum, name, FileType.DIRECTORY, DirectoryData(), permissions=permissions,
                           owner=owner, group=group, timeCreated=timeCreated, timeModified=timeModified)
     child = fs.inodes[childINum]
-    typing.cast(DirectoryData, child.data).addChildren({
+    cast(DirectoryData, child.data).addChildren({
         ".": childINum,
         "..": parentINum,
     })
@@ -91,6 +102,25 @@ def makeChildFile(fs: Filesystem, parentINum: INumber, name: str, data: INodeDat
 
     return makeChild(fs, parentINum, name, filetype, data, permissions=permissions, owner=owner, group=group,
                      timeCreated=timeCreated, timeModified=timeModified)
+
+
+def makeBin(fs: Filesystem, rootINum: INumber) -> INumber:
+    binDirINum = makeChildDir(fs, rootINum, "bin")
+
+    makeChildFile(fs, binDirINum, "cat", BinaryFileData(Cat), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "echo", BinaryFileData(Echo), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "ln", BinaryFileData(Ln), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "ls", BinaryFileData(Ls), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "mkdir", BinaryFileData(Mkdir), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "mv", BinaryFileData(Mv), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "ps", BinaryFileData(Ps), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "pwd", BinaryFileData(Pwd), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "rm", BinaryFileData(Rm), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "su", BinaryFileData(Su), permissions=FilePermissions(0o755))
+
+    makeChildFile(fs, binDirINum, "demo", BinaryFileData(Demo), permissions=FilePermissions(0o755))
+
+    return binDirINum
 
 
 def makeEtc(fs: Filesystem, rootINum: INumber) -> INumber:
@@ -133,15 +163,15 @@ def makeRoot() -> Filesystem:
     root = fs.add(
         INode(fs.claimNextINumber(), FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"],
               origTime, origTime, DirectoryData(), fs.uuid))
-    typing.cast(DirectoryData, root.data).addChildren({
+    cast(DirectoryData, root.data).addChildren({
         ".": root.iNumber,
         "..": root.iNumber,
     })
     root.references = 2
 
-    binDir = makeChildDir(fs, root.iNumber, "bin")
+    cast(DirectoryData, root.data).addChild("bin", makeBin(fs, root.iNumber))
     devDir = makeChildDir(fs, root.iNumber, "dev")
-    etcDir = typing.cast(DirectoryData, root.data).addChild("etc", makeEtc(fs, root.iNumber))
+    cast(DirectoryData, root.data).addChild("etc", makeEtc(fs, root.iNumber))
     tmpDir = makeChildDir(fs, root.iNumber, "tmp", permissions=FilePermissions(0o1777))
     usrDir = makeChildDir(fs, root.iNumber, "usr")
     varDir = makeChildDir(fs, root.iNumber, "var")
@@ -158,7 +188,7 @@ def makeDev(unix: Unix) -> Filesystem:
     devDir = fs.add(
         INode(fs.claimNextINumber(), FilePermissions(0o755), FileType.DIRECTORY, users["root"], groups["root"],
               origTime, origTime, DirectoryData(), fs.uuid))
-    typing.cast(DirectoryData, devDir.data).addChild(".", devDir.iNumber)
+    cast(DirectoryData, devDir.data).addChild(".", devDir.iNumber)
 
     makeChildFile(fs, devDir.iNumber, "null", DevNull(unix), filetype=FileType.CHARACTER,
                   permissions=FilePermissions(0o666))

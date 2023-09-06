@@ -1,4 +1,4 @@
-from filesystem.filesystem import FileType
+from filesystem.flags import FileType
 from process.process_code import ProcessCode
 
 

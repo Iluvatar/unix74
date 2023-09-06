@@ -1,7 +1,7 @@
 from process.process_code import ProcessCode
 
 
-class Cat(ProcessCode):
+class Mkdir(ProcessCode):
     def run(self) -> int:
         def readFromInput():
             pass

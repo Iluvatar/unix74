@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from uuid import UUID
 
-from filesystem.filesystem import FilePermissions, FileType, INumber
+from filesystem.filesystem import FilePermissions, INumber
+from filesystem.flags import FileType
 from user import GID, UID
 
 

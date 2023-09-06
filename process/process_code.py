@@ -1,7 +1,6 @@
-import typing
-from typing import List
+from typing import List, TYPE_CHECKING
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from libc import Libc
     from kernel.unix import SystemHandle
 
@@ -14,4 +13,4 @@ class ProcessCode:
         self.argv = argv
 
     def run(self) -> int:
-        raise NotImplementedError()
+        return 0

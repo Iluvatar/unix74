@@ -11,9 +11,10 @@ from typing import Any, Dict, List, NewType, Tuple, Type, TypeVar, cast
 from uuid import UUID
 
 from environment import Environment
-from filesystem.filesystem import DirectoryData, FilePermissions, FileType, Filesystem, INode, INodeData, INumber, Mode
+from filesystem.filesystem import BinaryFileData, DirectoryData, FilePermissions, Filesystem, INode, INodeData, INumber
 from filesystem.filesystem_loader import makeDev, makeRoot
 from filesystem.filesystem_utils import Dentry, INodeOperation, Mount, Stat
+from filesystem.flags import FileType, Mode
 from kernel.errors import Errno, KernelError
 from kernel.system_handle import SystemHandle
 from libc import Libc
@@ -43,7 +44,7 @@ class Unix:
         self.pipes: List[Connection] = []
 
         self.doStrace: bool = False
-        self.printDebug = False
+        self.printDebug: bool = False
 
     def __str__(self):
         out = "Unix74\n------\n"
@@ -119,6 +120,7 @@ class Unix:
             "setgid": self.setgid,
             "getpid": self.getpid,
             "umount": self.umount,
+            "execve": self.execve,
             "exit": self.exit,
         }
 
@@ -248,7 +250,7 @@ class Unix:
         return inode
 
     def traversePath(self, pid: PID, path: str, op: INodeOperation) -> INode:
-        if not self.rootNode:
+        if self.rootNode is None:
             raise KernelError("No root mount found", Errno.ENOENT)
 
         process = self.getProcess(pid)
@@ -325,13 +327,15 @@ class Unix:
         childPid = self.claimNextPid()
         userPipe, kernelPipe = Pipe()
         self.pipes.append(kernelPipe)
-        childProcessEntry = ProcessEntry(childPid, pid, command, process.realUid, process.realGid, process.currentDir,
-                                         pipe=kernelPipe)
-        self.processes.add(childProcessEntry)
 
         system = SystemHandle(childPid, env.copy(), userPipe, kernelPipe)
         libc = Libc(system)
         childProcess = OsProcess(child(system, libc, command, argv))
+
+        childProcessEntry = ProcessEntry(childPid, pid, command, process.realUid, process.realGid, process.currentDir,
+                                         childProcess, pipe=kernelPipe)
+        self.processes.add(childProcessEntry)
+
         childProcess.run()
         childProcessEntry.pythonPid = childProcess.process.pid
 
@@ -622,6 +626,25 @@ class Unix:
         pass
 
     @strace
+    def execve(self, pid: PID, path: str, args: List[str]) -> PID:
+        inode = self.getINodeFromPath(pid, path)
+        self.access(pid, inode, Mode.EXEC)
+        if not isinstance(inode.data, BinaryFileData):
+            raise KernelError(path, Errno.ENOEXEC)
+
+        binaryData = cast(BinaryFileData, inode.data)
+        process = self.getProcess(pid)
+        code = binaryData.processCode
+        command = path.split("/")[-1]
+
+        if binaryData.isEmpty():
+            return self.fork(pid, ProcessCode, command, args, process.process.code.system.env)
+        elif not binaryData.isComplete():
+            raise KernelError(path, Errno.EINTR)
+
+        return self.fork(pid, code, command, args, process.process.code.system.env)
+
+    @strace
     def exit(self, pid: PID, exitCode: int) -> None:
         process = self.getProcess(pid)
         if process.status == ProcessStatus.ZOMBIE:
@@ -651,13 +674,13 @@ class Unix:
 
     def startup(self):
         rootFs = makeRoot()
+        self.filesystems.add(rootFs)
         self.mounts.append(Mount(rootFs.uuid, UUID(int=0), INumber(0)))
         self.rootNode = rootFs
-        self.filesystems.add(rootFs)
 
         swapperPid = self.claimNextPid()
         swapper = ProcessEntry(swapperPid, swapperPid, "swapper", self.rootUser.uid, self.rootUser.gid,
-                               self.rootNode.root())
+                               self.rootNode.root(), cast(OsProcess, None))
         self.processes.add(swapper)
 
         devFs = makeDev(self)

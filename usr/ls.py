@@ -1,12 +1,14 @@
 import datetime
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
-from filesystem.filesystem import FileType, Mode, SetId
-from filesystem.filesystem_utils import Stat
+from filesystem.flags import FileType, Mode, SetId
 from kernel.errors import SyscallError
 from process.file_descriptor import OpenFlags
 from process.process_code import ProcessCode
 from user import GID, UID
+
+if TYPE_CHECKING:
+    from filesystem.filesystem_utils import Stat
 
 
 class Ls(ProcessCode):
@@ -94,7 +96,7 @@ class Ls(ProcessCode):
 
             return groupDict
 
-        def permissionString(stat: Stat) -> str:
+        def permissionString(stat: 'Stat') -> str:
             perms = stat.permissions
 
             s = fileTypeChar.get(stat.fileType, "?")
@@ -185,10 +187,11 @@ class Ls(ProcessCode):
 
                 if longFlag:
                     lineString += f"{fileParts['permissions']} "
-                    lineString += f"{fileParts['links']: >{linksLength}} "
+                    lineString += f"{fileParts['links']: >{linksLength + 1}} "
                     lineString += f"{fileParts['owner']: <{ownerLength}}   "
                     if groupFlag:
                         lineString += f"{fileParts['group']: <{groupLength}}   "
+                    lineString += f"{fileParts['size']: >8} "
                     lineString += f"{fileParts['modifiedStr']} "
 
                 lineString += f"{fileParts['name']}"
@@ -201,8 +204,9 @@ class Ls(ProcessCode):
             self.libc.printf(entry)
 
         for index, entry in enumerate(foundFiles):
-            if len(notFoundFiles) > 0 or index > 0:
+            if index > 0:
                 self.libc.printf("\n")
             self.libc.printf(entry)
 
-        return 0
+        exitCode = 1 if len(notFoundFiles) else 0
+        return exitCode

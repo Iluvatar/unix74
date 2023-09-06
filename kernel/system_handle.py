@@ -99,5 +99,8 @@ class SystemHandle:
     def umount(self, path: str) -> None:
         return self.__syscall("umount", path)
 
+    def execve(self, path: str, args: List[str]) -> PID:
+        return self.__syscall("execve", path, args)
+
     def exit(self, exitCode: int) -> None:
         return self.__syscall("exit", exitCode)

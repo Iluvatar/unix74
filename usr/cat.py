@@ -20,6 +20,8 @@ class Cat(ProcessCode):
             readFromInput()
             return 0
 
+        exitCode: int = 0
+
         for file in self.argv:
             if file == "-":
                 readFromInput()
@@ -28,6 +30,7 @@ class Cat(ProcessCode):
             try:
                 fd = self.system.open(file, OpenFlags.READ)
             except SyscallError as e:
+                exitCode = 1
                 if e.errno == Errno.EACCES:
                     self.libc.printf(f"{self.command}: {file}: Permission denied\n")
                     continue
@@ -36,14 +39,7 @@ class Cat(ProcessCode):
                     continue
                 raise
 
-            totalSize = 0
-            lastWasNewline = False
             while len(data := self.libc.read(fd, 1000)) > 0:
                 self.libc.printf(data)
-                totalSize += len(data)
-                lastWasNewline = data.endswith("\n")
-            if totalSize > 0 and not lastWasNewline:
-                data += "\n"
-            self.libc.printf(data)
 
-        return 0
+        return exitCode

@@ -1,44 +1,26 @@
 from __future__ import annotations
 
+import bz2
 import datetime
+import hashlib
+import inspect
 import math
-import typing
 from dataclasses import dataclass
-from enum import Enum, IntFlag, auto
-from typing import Dict
+from enum import Enum, auto
+from typing import Dict, NewType, TYPE_CHECKING, Type
 from uuid import UUID
 
+# from filesystem.flags import FileType, Mode, SetId
+from filesystem.flags import FileType, Mode, SetId
 from kernel.errors import Errno, KernelError
+from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
 from user import GID, UID
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from kernel.unix import Unix
 
-INumber = typing.NewType("INumber", int)
-
-
-class FileType(Enum):
-    NONE = auto()
-    REGULAR = auto()
-    DIRECTORY = auto()
-    CHARACTER = auto()
-    LINK = auto()
-    PIPE = auto()
-
-
-class Mode(IntFlag):
-    READ = 4
-    WRITE = 2
-    EXEC = 1
-    ALL = READ | WRITE | EXEC
-
-
-class SetId(IntFlag):
-    SET_UID = 4
-    SET_GID = 2
-    STICKY = 1
-    ALL = SET_UID | SET_GID | STICKY
+INumber = NewType("INumber", int)
 
 
 class FilePermissions:
@@ -130,25 +112,25 @@ class INode:
 
 class INodeData:
     def __init__(self):
-        self.data: str = ""
+        self._data: str = ""
 
     def read(self, size: int, offset: int) -> str:
-        return self.data[offset:offset + size]
+        return self._data[offset:offset + size]
 
     def write(self, data: str, offset: int) -> int:
-        self.data = self.data[:offset] + data
+        self._data = self._data[:offset] + data
         return len(data)
 
     def append(self, data: str) -> int:
-        self.data += data
+        self._data += data
         return len(data)
 
     def trunc(self) -> int:
-        self.data = ""
+        self._data = ""
         return 0
 
     def size(self) -> int:
-        return len(self.data)
+        return len(self._data)
 
 
 class DirectoryData(INodeData):
@@ -163,9 +145,9 @@ class DirectoryData(INodeData):
         raise KernelError("", Errno.EISDIR)
 
     def __makeData(self) -> None:
-        self.data = ""
+        self._data = ""
         for name, inumber in self.children.items():
-            self.data += f"{name}{inumber}"
+            self._data += f"{name}{inumber}"
 
     def addChildren(self, children: Dict[str, INumber]) -> None:
         for name, inumber in children.items():
@@ -188,7 +170,7 @@ class DirectoryData(INodeData):
 class RegularFileData(INodeData):
     def __init__(self, data):
         super().__init__()
-        self.data = data
+        self._data = data
 
 
 class SpecialFileData(INodeData):
@@ -207,6 +189,24 @@ class SpecialFileData(INodeData):
 
     def trunc(self):
         pass
+
+
+class BinaryFileData(INodeData):
+    def __init__(self, processCode: Type[ProcessCode]):
+        super().__init__()
+        self.processCode: Type[ProcessCode] = processCode
+        code = inspect.getsource(self.processCode)
+        self._data = self.mangleData(code)
+        self.__hash = hashlib.sha256(self._data.encode("utf-8")).digest()
+
+    def mangleData(self, data: str) -> str:
+        return bz2.compress(data.encode("utf-16")).decode("ascii", errors="replace").replace("\ufffd", "?")
+
+    def isComplete(self) -> bool:
+        return hashlib.sha256(self._data.encode("utf-8")).digest() == self.__hash
+
+    def isEmpty(self) -> bool:
+        return self.size() == 0
 
 
 class Filesystem:

@@ -1,11 +1,11 @@
-import typing
 from _md5 import md5
 from getpass import getpass
+from typing import TYPE_CHECKING
 
 from kernel.errors import Errno
 from process.file_descriptor import FD, OpenFlags, SeekFrom
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from kernel.unix import SystemHandle
 
 
@@ -24,7 +24,7 @@ class Libc:
     STDERR = FD(2)
 
     def __init__(self, systemHandle: 'SystemHandle'):
-        self.system = systemHandle
+        self.__system = systemHandle
 
     def printf(self, string: str) -> int:
         print(string, end="")
@@ -38,33 +38,33 @@ class Libc:
 
     def readAll(self, fd: FD) -> str:
         text = ""
-        while len(data := self.system.read(fd, 1000)) > 0:
+        while len(data := self.__system.read(fd, 1000)) > 0:
             text += data
         return text
 
     def open(self, path: str, mode: OpenFlags = OpenFlags.READ) -> FD:
-        return self.system.open(path, mode)
+        return self.__system.open(path, mode)
 
     def lseek(self, fd: FD, offset: int, whence: SeekFrom) -> int:
-        return self.system.lseek(fd, offset, whence)
+        return self.__system.lseek(fd, offset, whence)
 
     def read(self, fd: FD, size: int) -> str:
-        return self.system.read(fd, size)
+        return self.__system.read(fd, size)
 
     def write(self, fd: FD, data: str) -> int:
-        return self.system.write(fd, data)
+        return self.__system.write(fd, data)
 
     def close(self, fd: FD) -> None:
-        return self.system.close(fd)
+        return self.__system.close(fd)
 
     def crypt(self, plaintext) -> str:
         return md5(plaintext.encode("utf-8")).hexdigest()[:16]
 
     def getenv(self, var: str) -> str:
-        return self.system.env.getVar(var)
+        return self.__system.env.getVar(var)
 
     def setenv(self, var: str, value: str) -> None:
-        return self.system.env.setVar(var, value)
+        return self.__system.env.setVar(var, value)
 
     def getPw(self, name: str) -> str:
         fd = self.open("/etc/passwd", OpenFlags.READ)
