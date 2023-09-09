@@ -22,13 +22,14 @@ class Su(ProcessCode):
         parts = passwdLine.split(":")
         passHash = parts[1]
 
-        self.libc.printf("Password: ")
-        entered = self.libc.readline()
-        enteredHash = self.libc.crypt(entered)
+        if self.system.getuid() != 0:
+            self.libc.printf("Password: ")
+            entered = self.libc.readline()
+            enteredHash = self.libc.crypt(entered)
 
-        if enteredHash != passHash:
-            self.libc.printf("Sorry\n")
-            return 1
+            if enteredHash != passHash:
+                self.libc.printf("Sorry\n")
+                return 1
 
         uid = UID(int(parts[2]))
         try:
@@ -40,4 +41,5 @@ class Su(ProcessCode):
             raise
 
         self.system.exec("/bin/sh", [])
-        return 0
+        self.libc.printf("cannot execute sh\n")
+        return 1

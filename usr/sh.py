@@ -6,7 +6,6 @@ from typing import List, Tuple
 
 from kernel.errors import Errno, SyscallError
 from process.process_code import ProcessCode
-from user import UID
 
 variables = {
     "HOME": "/usr/liz",
@@ -85,8 +84,6 @@ class Sh(ProcessCode):
 
     def run(self) -> int:
         sys.stdin = open(0)
-
-        self.system.setuid(UID(128))
 
         lastCommand: str = ""
 
