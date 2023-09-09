@@ -4,7 +4,7 @@ from typing import List, Tuple, Type
 from environment import Environment
 from filesystem.filesystem import FilePermissions
 from filesystem.filesystem_utils import Dentry, Stat
-from kernel.errors import Errno, SyscallError
+from kernel.errors import Errno, ProcessKilledError, SyscallError
 from process.file_descriptor import FD, OpenFlags, PID, SeekFrom
 from process.process_code import ProcessCode
 from user import GID, UID
@@ -18,8 +18,11 @@ class SystemHandle:
         self.kernelPipe = kernelPipe
 
     def __syscall(self, name: str, *args):
-        self.userPipe.send((name, self.pid, *args))
-        ret = self.userPipe.recv()
+        try:
+            self.userPipe.send((name, self.pid, *args))
+            ret = self.userPipe.recv()
+        except (EOFError, BrokenPipeError):
+            raise ProcessKilledError from None
         if ret[1] != Errno.NONE:
             raise SyscallError(ret[0], ret[1])
         return ret[0]
@@ -101,6 +104,9 @@ class SystemHandle:
 
     def execve(self, path: str, args: List[str]) -> PID:
         return self.__syscall("execve", path, args)
+
+    def exec(self, path: str, args: List[str]) -> None:
+        return self.__syscall("exec", path, args)
 
     def exit(self, exitCode: int) -> None:
         return self.__syscall("exit", exitCode)

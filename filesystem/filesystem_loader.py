@@ -20,6 +20,7 @@ from usr.mv import Mv
 from usr.ps import Ps
 from usr.pwd import Pwd
 from usr.rm import Rm
+from usr.sh import Sh
 from usr.su import Su
 
 if TYPE_CHECKING:
@@ -116,7 +117,8 @@ def makeBin(fs: Filesystem, rootINum: INumber) -> INumber:
     makeChildFile(fs, binDirINum, "ps", BinaryFileData(Ps), permissions=FilePermissions(0o755))
     makeChildFile(fs, binDirINum, "pwd", BinaryFileData(Pwd), permissions=FilePermissions(0o755))
     makeChildFile(fs, binDirINum, "rm", BinaryFileData(Rm), permissions=FilePermissions(0o755))
-    makeChildFile(fs, binDirINum, "su", BinaryFileData(Su), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "sh", BinaryFileData(Sh), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "su", BinaryFileData(Su), permissions=FilePermissions(0o4755))
 
     makeChildFile(fs, binDirINum, "demo", BinaryFileData(Demo), permissions=FilePermissions(0o755))
 

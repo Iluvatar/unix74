@@ -14,7 +14,7 @@ from environment import Environment
 from filesystem.filesystem import BinaryFileData, DirectoryData, FilePermissions, Filesystem, INode, INodeData, INumber
 from filesystem.filesystem_loader import makeDev, makeRoot
 from filesystem.filesystem_utils import Dentry, INodeOperation, Mount, Stat
-from filesystem.flags import FileType, Mode
+from filesystem.flags import FileType, Mode, SetId
 from kernel.errors import Errno, KernelError
 from kernel.system_handle import SystemHandle
 from libc import Libc
@@ -121,6 +121,7 @@ class Unix:
             "getpid": self.getpid,
             "umount": self.umount,
             "execve": self.execve,
+            "exec": self.exec,
             "exit": self.exit,
         }
 
@@ -135,6 +136,11 @@ class Unix:
                 pid: PID = data[1]
                 args: Tuple[Any] = data[2:]
 
+                if self.printDebug:
+                    print("raw data:", repr(data))
+                    print("   ", pipe)
+                    print(f"    {pid}: {syscall}({', '.join([str(a) for a in args])})")
+
                 try:
                     if syscall in syscallDict:
                         syscallDict[syscall](pid, *args)
@@ -142,14 +148,17 @@ class Unix:
                         self.sendSyscallReturn(pipe, Errno.ENOSYS, f"Invalid syscall {syscall}")
                 except TypeError as e:
                     if self.printDebug:
+                        print("TypeError encountered:")
                         traceback.print_tb(e.__traceback__)
                     self.sendSyscallReturn(pipe, Errno.EINVAL, repr(e))
                 except KernelError as e:
                     if self.printDebug:
+                        print("KernelError encountered:")
                         traceback.print_tb(e.__traceback__)
                     self.sendSyscallReturn(pipe, e.errno, repr(e))
                 except Exception as e:
                     if self.printDebug:
+                        print("Other exception encountered:")
                         traceback.print_tb(e.__traceback__)
                     self.sendSyscallReturn(pipe, Errno.PANIC, repr(e))
 
@@ -167,15 +176,24 @@ class Unix:
                 if len(arg) > maxLen:
                     return f'"{arg[:maxLen - 3]}..."'
                 return repr(arg)
+            elif isinstance(arg, Dentry):
+                return f"Dentry[{arg.name}->{arg.iNumber} {str(arg.filesystemId)[:4]}]"
+            elif isinstance(arg, list):
+                maxLen = 50
+                innerPart = ', '.join([stringify(a) for a in arg])
+                if len(innerPart) + 2 > maxLen:
+                    innerPart = innerPart[:maxLen - 5] + "..."
+                return f"[{innerPart}]"
             else:
                 return repr(arg)
 
         def inner(*args, **kwargs):
             self = args[0]
+            pid = args[1]
             if self.doStrace:
                 name = func.__name__
                 argString = ", ".join([stringify(arg) for arg in args[2:]])
-                print(f"strace >>> {name}({argString})", end="")
+                print(f"strace >>> [{pid}]: {name}({argString})", end="")
 
             ret = func(*args, **kwargs)
 
@@ -319,10 +337,8 @@ class Unix:
     def getINodeParentFromPath(self, pid: PID, path: str) -> INode:
         return self.traversePath(pid, path, INodeOperation.PARENT)
 
-    # System calls
-
-    @strace
-    def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str], env: Environment) -> PID:
+    def createNewProcess(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str],
+                         env: Environment) -> ProcessEntry:
         process = self.getProcess(pid)
         childPid = self.claimNextPid()
         userPipe, kernelPipe = Pipe()
@@ -333,13 +349,59 @@ class Unix:
         childProcess = OsProcess(child(system, libc, command, argv))
 
         childProcessEntry = ProcessEntry(childPid, pid, command, process.realUid, process.realGid, process.currentDir,
-                                         childProcess, pipe=kernelPipe)
+                                         childProcess, uid=process.uid, gid=process.gid, pipe=kernelPipe)
         self.processes.add(childProcessEntry)
+        return childProcessEntry
 
+    def startProcess(self, processEntry: ProcessEntry) -> None:
+        childProcess = processEntry.process
         childProcess.run()
-        childProcessEntry.pythonPid = childProcess.process.pid
+        processEntry.pythonPid = childProcess.pythonProcess.pid
 
-        return self.syscallReturnSuccess(pid, childPid)
+    # System calls
+
+    @strace
+    def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str], env: Environment) -> PID:
+        childProcessEntry = self.createNewProcess(pid, child, command, argv, env)
+        self.startProcess(childProcessEntry)
+        return self.syscallReturnSuccess(pid, childProcessEntry.pid)
+
+    @strace
+    def exec(self, pid: PID, path: str, args: List[str]) -> None:
+        inode = self.getINodeFromPath(pid, path)
+        self.access(pid, inode, Mode.EXEC)
+        if not isinstance(inode.data, BinaryFileData):
+            raise KernelError(path, Errno.ENOEXEC)
+
+        binaryData = cast(BinaryFileData, inode.data)
+        processCode = binaryData.processCode
+        command = path.split("/")[-1]
+
+        if binaryData.isEmpty():
+            # TODO fix
+            raise KernelError(path, Errno.EINTR)
+        elif not binaryData.isComplete():
+            raise KernelError(path, Errno.EINTR)
+
+        process: ProcessEntry = self.getProcess(pid)
+        if process.pipe:
+            process.pipe.close()
+            self.pipes.remove(process.pipe)
+        userPipe, kernelPipe = Pipe()
+        process.pipe = kernelPipe
+        self.pipes.append(kernelPipe)
+
+        system = SystemHandle(pid, process.process.code.system.env, userPipe, kernelPipe)
+        libc = Libc(system)
+        process.process = OsProcess(processCode(system, libc, command, args))
+        process.command = command
+
+        if inode.permissions.high & SetId.SET_UID:
+            process.uid = inode.owner
+        if inode.permissions.high & SetId.SET_GID:
+            process.gid = inode.group
+
+        self.startProcess(process)
 
     def createFd(self, inode: INode, flags: OpenFlags, pid: PID) -> FD:
         process = self.getProcess(pid)
@@ -642,7 +704,15 @@ class Unix:
         elif not binaryData.isComplete():
             raise KernelError(path, Errno.EINTR)
 
-        return self.fork(pid, code, command, args, process.process.code.system.env)
+        childProcessEntry = self.createNewProcess(pid, code, command, args, process.process.code.system.env)
+
+        if inode.permissions.high & SetId.SET_UID:
+            childProcessEntry.uid = inode.owner
+        if inode.permissions.high & SetId.SET_GID:
+            childProcessEntry.gid = inode.group
+
+        self.startProcess(childProcessEntry)
+        return self.syscallReturnSuccess(pid, childProcessEntry.pid)
 
     @strace
     def exit(self, pid: PID, exitCode: int) -> None:
@@ -667,7 +737,7 @@ class Unix:
                 self.processes.remove(process.pid)
                 self.syscallReturnSuccess(process.ppid, (pid, exitCode))
 
-        # make sure actual process terminates
+        # make sure actual pythonProcess terminates
         if process.pipe:
             process.pipe.close()
             self.pipes.remove(process.pipe)

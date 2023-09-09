@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 from kernel.errors import Errno, SyscallError
 from process.process_code import ProcessCode
+from user import UID
 
 variables = {
     "HOME": "/usr/liz",
@@ -85,7 +86,7 @@ class Sh(ProcessCode):
     def run(self) -> int:
         sys.stdin = open(0)
 
-        # self.system.setuid(UID(128))
+        self.system.setuid(UID(128))
 
         lastCommand: str = ""
 
@@ -106,8 +107,8 @@ class Sh(ProcessCode):
                 self.libc.printf("\n")
                 continue
             except EOFError:
-                self.libc.printf("\n")
-                break
+                self.libc.printf("exit\n")
+                line = "exit"
 
             reprint, processedLine = self.processLine(line, lastCommand)
 
@@ -132,6 +133,11 @@ class Sh(ProcessCode):
                     self.libc.setenv("OLDPWD", self.libc.getenv("PWD"))
                 except SyscallError as e:
                     self.libc.printf(f"{e}\n")
+            elif command == "exit":
+                exitCode = 0
+                if len(args) > 0:
+                    exitCode = int(args[0])
+                self.system.exit(exitCode)
             else:
                 path = self.findCommandPath(command)
                 if path is None:

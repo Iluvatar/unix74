@@ -11,7 +11,7 @@ from types import FrameType
 from typing import List, TYPE_CHECKING, Tuple
 
 from filesystem.filesystem import INode
-from kernel.errors import Errno, SyscallError
+from kernel.errors import Errno, ProcessKilledError, SyscallError
 from process.file_descriptor import FD, PID, ProcessFileDescriptor
 from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
@@ -81,11 +81,11 @@ class OsProcess:
         if signalHandlers is not None:
             self.signalHandlers = signalHandlers
         self.code = code
-        self.process: Process | None = None
+        self.pythonProcess: Process | None = None
 
     def run(self):
-        self.process = Process(target=self.runInternal)
-        self.process.start()
+        self.pythonProcess = Process(target=self.runInternal)
+        self.pythonProcess.start()
 
     def runInternal(self):
         self.code.system.kernelPipe.close()
@@ -94,6 +94,7 @@ class OsProcess:
             signal(handler[0], handler[1])
 
         exitCode = Errno.UNSPECIFIED
+        doCleanup = True
         try:
             exitCode = self.code.run()
             if exitCode is None:
@@ -101,11 +102,14 @@ class OsProcess:
         except SyscallError as e:
             exitCode = e.errno
             pass
+        except ProcessKilledError:
+            doCleanup = False
         except Exception as e:
             traceback.print_tb(e.__traceback__)
             print(repr(e))
 
         try:
-            self.code.system.exit(exitCode)
-        except (EOFError, BrokenPipeError):
+            if doCleanup:
+                self.code.system.exit(exitCode)
+        except ProcessKilledError:
             pass

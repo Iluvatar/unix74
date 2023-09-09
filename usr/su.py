@@ -38,4 +38,6 @@ class Su(ProcessCode):
                 self.libc.printf("Cannot set uid\n")
                 return 1
             raise
+
+        self.system.exec("/bin/sh", [])
         return 0

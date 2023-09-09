@@ -3,7 +3,6 @@ from enum import IntEnum, auto
 
 class Errno(IntEnum):
     NONE = 0
-    UNSPECIFIED = auto()
     EPERM = auto()
     EACCES = auto()
     ENOENT = auto()
@@ -18,6 +17,9 @@ class Errno(IntEnum):
     ENOEXEC = auto()
     EINTR = auto()
 
+    UNSPECIFIED = auto()  # internal use
+    EKILLED = auto()  # internal use
+
     PANIC = 255
 
 
@@ -31,4 +33,8 @@ class KernelError(Exception):
 
 
 class SyscallError(KernelError):
+    pass
+
+
+class ProcessKilledError(Exception):
     pass
