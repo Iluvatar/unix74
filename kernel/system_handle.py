@@ -69,6 +69,9 @@ class SystemHandle:
     def chdir(self, path: str) -> None:
         return self.__syscall("chdir", path)
 
+    def chmod(self, path: str, permissions: FilePermissions) -> None:
+        return self.__syscall("chmod", path, permissions)
+
     def stat(self, path: str) -> Stat:
         return self.__syscall("stat", path)
 

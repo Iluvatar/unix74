@@ -121,6 +121,7 @@ class Sh(ProcessCode):
 
             lastCommand = processedLine
 
+            exitCode = 0
             if command == "cd":
                 path = "/"
                 if len(args) > 0:
@@ -129,9 +130,12 @@ class Sh(ProcessCode):
                     self.system.chdir(path)
                     self.libc.setenv("OLDPWD", self.libc.getenv("PWD"))
                 except SyscallError as e:
-                    self.libc.printf(f"{e}\n")
+                    if e.errno == Errno.ENOENT:
+                        self.libc.printf(f"{path}: No such file or directory\n")
+                        exitCode = 1
+                    else:
+                        self.libc.printf(f"{e}\n")
             elif command == "exit":
-                exitCode = 0
                 if len(args) > 0:
                     exitCode = int(args[0])
                 self.system.exit(exitCode)
@@ -160,6 +164,6 @@ class Sh(ProcessCode):
                         self.libc.printf(f"{path}: Error\n")
                         exitCode = ShellError.EXIT_CANCELED
 
-                self.libc.setenv("?", str(exitCode))
+            self.libc.setenv("?", str(exitCode))
 
         return 0

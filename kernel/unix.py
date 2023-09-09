@@ -109,6 +109,7 @@ class Unix:
             "link": self.link,
             "unlink": self.unlink,
             "chdir": self.chdir,
+            "chmod": self.chmod,
             "getdents": self.getdents,
             "stat": self.stat,
             "waitpid": self.waitpid,
@@ -540,8 +541,14 @@ class Unix:
         return self.syscallReturnSuccess(pid, None)
 
     @strace
-    def chmod(self, pid: PID, path: str, permissions: FilePermissions) -> int:
-        pass
+    def chmod(self, pid: PID, path: str, permissions: FilePermissions) -> None:
+        process = self.getProcess(pid)
+        inode = self.getINodeFromPath(pid, path)
+        if self.isSuperUser(process.uid) or process.uid == inode.owner:
+            inode.permissions = permissions
+        else:
+            raise KernelError("", Errno.EPERM)
+        return self.syscallReturnSuccess(pid, None)
 
     @strace
     def chown(self, pid: PID, path: str, owner: int, group: int) -> int:
@@ -761,5 +768,7 @@ class Unix:
         self.pipes.append(kernelPipe)
         system = SystemHandle(swapper.pid, Environment(), userPipe, kernelPipe)
         pid = system.fork(Sh, "sh", [])
+        self.getProcess(pid).process.code.system.setgid(GID(128))
+        self.getProcess(pid).process.code.system.setuid(UID(128))
         while True:
             sleep(1000)

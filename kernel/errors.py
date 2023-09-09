@@ -29,7 +29,10 @@ class KernelError(Exception):
         self.errno = errno
 
     def __str__(self):
-        return f"{str(self.errno)}: {self.args[0]}"
+        return f"KernelError:({Errno(self.errno).name}: '{self.args[0]}')"
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class SyscallError(KernelError):

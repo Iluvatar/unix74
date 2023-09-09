@@ -11,6 +11,7 @@ from filesystem.filesystem import BinaryFileData, DirectoryData, FilePermissions
 from filesystem.flags import FileType, Mode, SetId
 from user import GID, UID
 from usr.cat import Cat
+from usr.chmod import Chmod
 from usr.demo import Demo
 from usr.echo import Echo
 from usr.ln import Ln
@@ -110,6 +111,7 @@ def makeBin(fs: Filesystem, rootINum: INumber) -> INumber:
     binDirINum = makeChildDir(fs, rootINum, "bin")
 
     makeChildFile(fs, binDirINum, "cat", BinaryFileData(Cat), permissions=FilePermissions(0o755))
+    makeChildFile(fs, binDirINum, "chmod", BinaryFileData(Chmod), permissions=FilePermissions(0o755))
     makeChildFile(fs, binDirINum, "echo", BinaryFileData(Echo), permissions=FilePermissions(0o755))
     makeChildFile(fs, binDirINum, "ln", BinaryFileData(Ln), permissions=FilePermissions(0o755))
     makeChildFile(fs, binDirINum, "ls", BinaryFileData(Ls), permissions=FilePermissions(0o755))
