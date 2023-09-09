@@ -63,7 +63,7 @@ class Ls(ProcessCode):
 
         def getUidToUserDict() -> Dict[UID, str]:
             userDict: Dict[UID, str] = {}
-            passwdFd = self.system.open("/etc/passwd", OpenFlags.READ)
+            passwdFd = self.libc.open("/etc/passwd")
             contents = self.libc.readAll(passwdFd)
             self.system.close(passwdFd)
             lines = contents.split("\n")

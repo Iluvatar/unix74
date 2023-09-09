@@ -568,7 +568,7 @@ class Unix:
     @strace
     def geteuid(self, pid: PID) -> UID:
         process = self.getProcess(pid)
-        return process.uid
+        return self.syscallReturnSuccess(pid, process.uid)
 
     @strace
     def setuid(self, pid: PID, uid: UID) -> None:
