@@ -40,5 +40,5 @@ class Pwd(ProcessCode):
                 self.system.close(parentFd)
                 break
 
-        self.libc.printf("/" + "/".join(parts) + "\n")
+        self.libc.printf("/" + "/".join(parts[::-1]) + "\n")
         return 0
