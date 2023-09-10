@@ -25,5 +25,6 @@ class Ln(ProcessCode):
                 print(f"{self.command}: no such file or directory")
             elif e.errno == Errno.EXDEV:
                 print(f"{self.command}: cannot link across filesystems")
-            raise
+            else:
+                raise
         return exitCode

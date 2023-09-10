@@ -21,6 +21,7 @@ class Su(ProcessCode):
             return 1
         parts = passwdLine.split(":")
         passHash = parts[1]
+        shell = parts[6]
 
         if self.system.getuid() != 0:
             self.libc.printf("Password: ")
@@ -40,6 +41,9 @@ class Su(ProcessCode):
                 return 1
             raise
 
-        self.system.execv("/bin/sh", [])
-        self.libc.printf("cannot execute sh\n")
+        try:
+            self.system.execv(shell, [])
+        except SyscallError:
+            pass
+        self.libc.printf(f"cannot execute {shell}\n")
         return 1

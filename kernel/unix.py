@@ -772,7 +772,7 @@ class Unix:
 
         devFs = makeDev(self)
         self.mount(swapperPid, "/dev", devFs)
-        swapperProcess.code.system.userPipe.recv()  # to eat the return value from the mount call above
+        swapperProcess.code.system.userPipe.recv()  # eat the return value from the mount call above
 
         pid = swapperProcess.code.system.forkexecv("/bin/sh", [])
         self.getProcess(pid).process.code.system.setgid(GID(128))
