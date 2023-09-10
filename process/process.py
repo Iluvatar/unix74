@@ -51,6 +51,8 @@ class ProcessEntry:
             self.uid = self.realUid
         if self.gid is None:
             self.gid = self.realGid
+        if self.pipe is None:
+            self.pipe = self.process.code.system.kernelPipe
 
     def claimNextFdNum(self):
         i: FD = FD(0)

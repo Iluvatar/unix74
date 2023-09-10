@@ -39,8 +39,14 @@ class SystemHandle:
     def debug__print_filesystems(self) -> None:
         return self.__syscall("debug__print_filesystems")
 
-    def fork(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
-        return self.__syscall("fork", child, command, argv, self.env)
+    def fork_(self, child: Type[ProcessCode], command: str, argv: List[str]) -> PID:
+        return self.__syscall("fork_", child, command, argv, self.env)
+
+    def forkexecv(self, path: str, args: List[str]) -> PID:
+        return self.__syscall("forkexecv", path, args)
+
+    def execv(self, path: str, args: List[str]) -> None:
+        return self.__syscall("execv", path, args)
 
     def open(self, path: str, mode: OpenFlags) -> FD:
         return self.__syscall("open", path, mode)
@@ -104,12 +110,6 @@ class SystemHandle:
 
     def umount(self, path: str) -> None:
         return self.__syscall("umount", path)
-
-    def execve(self, path: str, args: List[str]) -> PID:
-        return self.__syscall("execve", path, args)
-
-    def exec(self, path: str, args: List[str]) -> None:
-        return self.__syscall("exec", path, args)
 
     def exit(self, exitCode: int) -> None:
         return self.__syscall("exit", exitCode)

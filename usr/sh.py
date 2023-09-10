@@ -147,7 +147,7 @@ class Sh(ProcessCode):
                     continue
 
                 try:
-                    pid = self.system.execve(path, args)
+                    pid = self.system.forkexecv(path, args)
                     _, exitCode = self.system.waitpid(pid)
                 except SyscallError as e:
                     if e.errno == Errno.EACCES:

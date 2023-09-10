@@ -40,6 +40,6 @@ class Su(ProcessCode):
                 return 1
             raise
 
-        self.system.exec("/bin/sh", [])
+        self.system.execv("/bin/sh", [])
         self.libc.printf("cannot execute sh\n")
         return 1

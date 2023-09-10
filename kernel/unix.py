@@ -16,6 +16,7 @@ from filesystem.filesystem_loader import makeDev, makeRoot
 from filesystem.filesystem_utils import Dentry, INodeOperation, Mount, Stat
 from filesystem.flags import FileType, Mode, SetId
 from kernel.errors import Errno, KernelError
+from kernel.swapper import Swapper
 from kernel.system_handle import SystemHandle
 from libc import Libc
 from process.file_descriptor import FD, OFD, OpenFileDescriptor, OpenFlags, PID, SeekFrom
@@ -23,7 +24,6 @@ from process.process import OsProcess, ProcessEntry, ProcessFileDescriptor, Proc
 from process.process_code import ProcessCode
 from self_keyed_dict import SelfKeyedDict
 from user import GID, Group, GroupName, GroupPassword, Password, UID, User, UserName
-from usr.sh import Sh
 
 T = TypeVar("T")
 
@@ -99,7 +99,9 @@ class Unix:
             "debug__print_processes": self.printProcesses,
             "debug__print_filesystems": self.printFilesystems,
 
-            "fork": self.fork,
+            "fork_": self.fork_,
+            "forkexecv": self.forkexecv,
+            "execv": self.execv,
             "open": self.open,
             "creat": self.creat,
             "lseek": self.lseek,
@@ -121,8 +123,6 @@ class Unix:
             "setgid": self.setgid,
             "getpid": self.getpid,
             "umount": self.umount,
-            "execve": self.execve,
-            "exec": self.exec,
             "exit": self.exit,
         }
 
@@ -338,70 +338,104 @@ class Unix:
     def getINodeParentFromPath(self, pid: PID, path: str) -> INode:
         return self.traversePath(pid, path, INodeOperation.PARENT)
 
-    def createNewProcess(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str],
-                         env: Environment) -> ProcessEntry:
-        process = self.getProcess(pid)
-        childPid = self.claimNextPid()
+    def makeKernelPipes(self) -> Tuple[Connection, Connection]:
         userPipe, kernelPipe = Pipe()
         self.pipes.append(kernelPipe)
+        return userPipe, kernelPipe
 
-        system = SystemHandle(childPid, env.copy(), userPipe, kernelPipe)
+    @staticmethod
+    def createOsProcess(pid: PID, env: Environment, userPipe: Connection, kernelPipe: Connection, command: str,
+                        argv: List[str], binary: Type[ProcessCode]):
+        system = SystemHandle(pid, env.copy(), userPipe, kernelPipe)
         libc = Libc(system)
-        childProcess = OsProcess(child(system, libc, command, argv))
+        return OsProcess(binary(system, libc, command, argv))
+
+    def createChildProcess(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str],
+                           env: Environment) -> ProcessEntry:
+        process = self.getProcess(pid)
+        childPid = self.claimNextPid()
+        userPipe, kernelPipe = self.makeKernelPipes()
+
+        childProcess = self.createOsProcess(childPid, env, userPipe, kernelPipe, command, argv, child)
 
         childProcessEntry = ProcessEntry(childPid, pid, command, process.realUid, process.realGid, process.currentDir,
-                                         childProcess, uid=process.uid, gid=process.gid, pipe=kernelPipe)
+                                         childProcess, uid=process.uid, gid=process.gid)
         self.processes.add(childProcessEntry)
         return childProcessEntry
 
     def startProcess(self, processEntry: ProcessEntry) -> None:
-        childProcess = processEntry.process
-        childProcess.run()
-        processEntry.pythonPid = childProcess.pythonProcess.pid
+        osProcess = processEntry.process
+        osProcess.run()
+        processEntry.pythonPid = osProcess.pythonProcess.pid
 
     # System calls
 
     @strace
-    def fork(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str], env: Environment) -> PID:
-        childProcessEntry = self.createNewProcess(pid, child, command, argv, env)
+    def fork_(self, pid: PID, child: Type[ProcessCode], command: str, argv: List[str], env: Environment) -> PID:
+        childProcessEntry = self.createChildProcess(pid, child, command, argv, env)
         self.startProcess(childProcessEntry)
         return self.syscallReturnSuccess(pid, childProcessEntry.pid)
 
-    @strace
-    def exec(self, pid: PID, path: str, args: List[str]) -> None:
+    def getExecutableFromPath(self, pid: PID, path: str) -> Tuple[INode, BinaryFileData]:
         inode = self.getINodeFromPath(pid, path)
         self.access(pid, inode, Mode.EXEC)
         if not isinstance(inode.data, BinaryFileData):
             raise KernelError(path, Errno.ENOEXEC)
 
-        binaryData = cast(BinaryFileData, inode.data)
-        processCode = binaryData.processCode
-        command = path.split("/")[-1]
+        return inode, cast(BinaryFileData, inode.data)
 
-        if binaryData.isEmpty():
-            # TODO fix
-            raise KernelError(path, Errno.EINTR)
-        elif not binaryData.isComplete():
-            raise KernelError(path, Errno.EINTR)
-
-        process: ProcessEntry = self.getProcess(pid)
-        if process.pipe:
-            process.pipe.close()
-            self.pipes.remove(process.pipe)
-        userPipe, kernelPipe = Pipe()
-        process.pipe = kernelPipe
-        self.pipes.append(kernelPipe)
-
-        system = SystemHandle(pid, process.process.code.system.env, userPipe, kernelPipe)
-        libc = Libc(system)
-        process.process = OsProcess(processCode(system, libc, command, args))
-        process.command = command
-
+    def setGuid(self, inode: INode, process: ProcessEntry) -> None:
         if inode.permissions.high & SetId.SET_UID:
             process.uid = inode.owner
         if inode.permissions.high & SetId.SET_GID:
             process.gid = inode.group
 
+    @strace
+    def forkexecv(self, pid: PID, path: str, args: List[str]) -> PID:
+        inode, binaryData = self.getExecutableFromPath(pid, path)
+
+        process = self.getProcess(pid)
+        processCode = binaryData.processCode
+        command = path.split("/")[-1]
+
+        if binaryData.isEmpty():
+            processCode = ProcessCode
+        elif not binaryData.isComplete():
+            raise KernelError(path, Errno.EINTR)
+
+        childProcessEntry = self.createChildProcess(pid, processCode, command, args, process.process.code.system.env)
+
+        self.setGuid(inode, childProcessEntry)
+        self.startProcess(childProcessEntry)
+        return self.syscallReturnSuccess(pid, childProcessEntry.pid)
+
+    @strace
+    def execv(self, pid: PID, path: str, args: List[str]) -> None:
+        inode, binaryData = self.getExecutableFromPath(pid, path)
+
+        process = self.getProcess(pid)
+        processCode = binaryData.processCode
+        command = path.split("/")[-1]
+
+        if binaryData.isEmpty():
+            processCode = ProcessCode
+        elif not binaryData.isComplete():
+            raise KernelError(path, Errno.EINTR)
+
+        # clean up old process
+        if process.pipe:
+            process.pipe.close()
+            self.pipes.remove(process.pipe)
+
+        # initialize new process using the same ProcessEntry to fake replacement
+        userPipe, kernelPipe = self.makeKernelPipes()
+        process.pipe = kernelPipe
+
+        process.command = command
+        process.process = self.createOsProcess(pid, process.process.code.system.env, userPipe, kernelPipe, command,
+                                               args, processCode)
+
+        self.setGuid(inode, process)
         self.startProcess(process)
 
     def createFd(self, inode: INode, flags: OpenFlags, pid: PID) -> FD:
@@ -695,33 +729,6 @@ class Unix:
         pass
 
     @strace
-    def execve(self, pid: PID, path: str, args: List[str]) -> PID:
-        inode = self.getINodeFromPath(pid, path)
-        self.access(pid, inode, Mode.EXEC)
-        if not isinstance(inode.data, BinaryFileData):
-            raise KernelError(path, Errno.ENOEXEC)
-
-        binaryData = cast(BinaryFileData, inode.data)
-        process = self.getProcess(pid)
-        code = binaryData.processCode
-        command = path.split("/")[-1]
-
-        if binaryData.isEmpty():
-            return self.fork(pid, ProcessCode, command, args, process.process.code.system.env)
-        elif not binaryData.isComplete():
-            raise KernelError(path, Errno.EINTR)
-
-        childProcessEntry = self.createNewProcess(pid, code, command, args, process.process.code.system.env)
-
-        if inode.permissions.high & SetId.SET_UID:
-            childProcessEntry.uid = inode.owner
-        if inode.permissions.high & SetId.SET_GID:
-            childProcessEntry.gid = inode.group
-
-        self.startProcess(childProcessEntry)
-        return self.syscallReturnSuccess(pid, childProcessEntry.pid)
-
-    @strace
     def exit(self, pid: PID, exitCode: int) -> None:
         process = self.getProcess(pid)
         if process.status == ProcessStatus.ZOMBIE:
@@ -755,20 +762,21 @@ class Unix:
         self.mounts.append(Mount(rootFs.uuid, UUID(int=0), INumber(0)))
         self.rootNode = rootFs
 
+        # manually set up swapper process
         swapperPid = self.claimNextPid()
+        userPipe, kernelPipe = self.makeKernelPipes()
+        swapperProcess = self.createOsProcess(swapperPid, Environment(), userPipe, kernelPipe, "swapper", [], Swapper)
         swapper = ProcessEntry(swapperPid, swapperPid, "swapper", self.rootUser.uid, self.rootUser.gid,
-                               self.rootNode.root(), cast(OsProcess, None))
+                               self.rootNode.root(), swapperProcess)
         self.processes.add(swapper)
 
         devFs = makeDev(self)
-        self.mount(PID(0), "/dev", devFs)
+        self.mount(swapperPid, "/dev", devFs)
+        swapperProcess.code.system.userPipe.recv()  # to eat the return value from the mount call above
 
-        userPipe, kernelPipe = Pipe()
-        swapper.pipe = kernelPipe
-        self.pipes.append(kernelPipe)
-        system = SystemHandle(swapper.pid, Environment(), userPipe, kernelPipe)
-        pid = system.fork(Sh, "sh", [])
+        pid = swapperProcess.code.system.forkexecv("/bin/sh", [])
         self.getProcess(pid).process.code.system.setgid(GID(128))
         self.getProcess(pid).process.code.system.setuid(UID(128))
+
         while True:
             sleep(1000)

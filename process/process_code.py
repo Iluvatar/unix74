@@ -13,4 +13,4 @@ class ProcessCode:
         self.argv = argv
 
     def run(self) -> int:
-        return 0
+        pass
