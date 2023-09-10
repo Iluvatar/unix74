@@ -5,7 +5,7 @@ from process.process_code import ProcessCode
 class Ln(ProcessCode):
     def run(self) -> int:
         if len(self.argv) < 2:
-            print("Usage: ln target alias")
+            print(f"Usage: {self.command} target alias")
             return 1
 
         target = self.argv[0]
@@ -18,12 +18,12 @@ class Ln(ProcessCode):
         except SyscallError as e:
             exitCode = 1
             if e.errno == Errno.EACCES:
-                print(f"ln: permission denied")
+                print(f"{self.command}: permission denied")
             elif e.errno == Errno.EISDIR:
-                print(f"ln: cannot hard link directories")
+                print(f"{self.command}: cannot hard link directories")
             elif e.errno == Errno.ENOENT:
-                print(f"ln: no such file or directory")
+                print(f"{self.command}: no such file or directory")
             elif e.errno == Errno.EXDEV:
-                print(f"ln: cannot link across filesystems")
+                print(f"{self.command}: cannot link across filesystems")
             raise
         return exitCode

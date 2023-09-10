@@ -13,10 +13,10 @@ class Rm(ProcessCode):
         except SyscallError as e:
             exitCode = 1
             if e.errno == Errno.EACCES:
-                print(f"rm: permission denied")
+                print(f"{self.command}: permission denied")
             elif e.errno == Errno.EISDIR:
-                print(f"rm: cannot delete directory")
+                print(f"{self.command}: cannot delete directory")
             elif e.errno == Errno.ENOENT:
-                print(f"rm: no such file or directory")
+                print(f"{self.command}: no such file or directory")
 
         return exitCode
