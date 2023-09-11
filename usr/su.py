@@ -21,6 +21,7 @@ class Su(ProcessCode):
             return 1
         parts = passwdLine.split(":")
         passHash = parts[1]
+        home = parts[5]
         shell = parts[6]
 
         if self.system.getuid() != 0:
@@ -41,6 +42,7 @@ class Su(ProcessCode):
                 return 1
             raise
 
+        self.system.chdir(home)
         try:
             self.system.execv(shell, [])
         except SyscallError:
